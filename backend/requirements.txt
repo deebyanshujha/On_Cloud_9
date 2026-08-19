@@ -1,0 +1,18 @@
+pydantic>=2.6
+pytest>=8.0
+sqlalchemy>=2.0
+httpx>=0.27
+
+# Added in step 6 (NER, no LLM APIs):
+spacy>=3.8
+scispacy>=0.6
+# scispaCy's disease/chemical NER model isn't a normal PyPI package — pip
+# install it directly from its release URL (not resolvable via this file):
+#   pip install "https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_ner_bc5cdr_md-0.5.4.tar.gz"
+
+# Added in step 8 (API layer):
+fastapi>=0.110
+uvicorn[standard]>=0.27
+
+# Not added yet (later build steps):
+# apscheduler (Step 7 — scheduler — deliberately deferred in favor of Step 8)

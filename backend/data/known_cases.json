@@ -1,0 +1,77 @@
+{
+  "_comment": "Hand-written fixture for step 2 of the build: prove the comparison/scoring engine works before any real ingestion exists. approved_indications = ground truth as of each drug's ORIGINAL approval (before it was repurposed), so the classic repurposing pairs below correctly come out as signals rather than being masked by the drug's later, second approval.",
+
+  "approved_indications": [
+    {
+      "drug": "metformin",
+      "disease": "type 2 diabetes",
+      "source": "openfda",
+      "url": "https://www.accessdata.fda.gov/drugsatfda_docs/label/2017/020357s037s039,021202s021s023lbl.pdf"
+    },
+    {
+      "drug": "sildenafil",
+      "disease": "erectile dysfunction",
+      "source": "openfda",
+      "url": "https://www.accessdata.fda.gov/drugsatfda_docs/label/2014/020895s032lbl.pdf"
+    },
+    {
+      "drug": "thalidomide",
+      "disease": "erythema nodosum leprosum",
+      "source": "openfda",
+      "url": "https://www.accessdata.fda.gov/drugsatfda_docs/label/2013/020785s033lbl.pdf"
+    }
+  ],
+
+  "documents": [
+    {
+      "drug": "metformin",
+      "disease": "pancreatic cancer",
+      "source": "clinicaltrials",
+      "source_id": "NCT-DEMO-0001",
+      "phase": "phase 2",
+      "date": "2025-11-10",
+      "url": "https://clinicaltrials.gov/study/NCT-DEMO-0001",
+      "num_mentions": 1
+    },
+    {
+      "drug": "metformin",
+      "disease": "pancreatic cancer",
+      "source": "biorxiv",
+      "source_id": "10.1101/DEMO.0001",
+      "phase": null,
+      "date": "2025-09-02",
+      "url": "https://www.biorxiv.org/content/10.1101/DEMO.0001",
+      "num_mentions": 1
+    },
+    {
+      "drug": "sildenafil",
+      "disease": "pulmonary hypertension",
+      "source": "clinicaltrials",
+      "source_id": "NCT-DEMO-0002",
+      "phase": "phase 3",
+      "date": "2024-05-15",
+      "url": "https://clinicaltrials.gov/study/NCT-DEMO-0002",
+      "num_mentions": 1
+    },
+    {
+      "drug": "thalidomide",
+      "disease": "multiple myeloma",
+      "source": "clinicaltrials",
+      "source_id": "NCT-DEMO-0003",
+      "phase": "phase 2",
+      "date": "2023-01-20",
+      "url": "https://clinicaltrials.gov/study/NCT-DEMO-0003",
+      "num_mentions": 1
+    },
+    {
+      "drug": "metformin",
+      "disease": "type 2 diabetes",
+      "source": "clinicaltrials",
+      "source_id": "NCT-DEMO-0004",
+      "phase": "phase 4",
+      "date": "2025-06-01",
+      "url": "https://clinicaltrials.gov/study/NCT-DEMO-0004",
+      "num_mentions": 1
+    }
+  ]
+}

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Drug Repurposing Signal Engine — Architecture</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121821;
+    --border: #223042;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #4fd1c5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    padding: 32px 24px 64px;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 650;
+    margin: 0 0 4px;
+    text-align: center;
+  }
+  p.sub {
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+    margin: 0 0 28px;
+  }
+  .panel {
+    max-width: 1100px;
+    margin: 0 auto 32px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    overflow-x: auto;
+  }
+  .mermaid { display: flex; justify-content: center; }
+  .legend {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .card h3 {
+    margin: 0 0 6px;
+    font-size: 13px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .card p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+  <h1>Real-Time Biotech Arbitrage Engine — System Flow</h1>
+  <p class="sub">Data sources → extraction → comparison logic → scoring → serving</p>
+
+  <div class="panel">
+    <div class="mermaid">
+graph TD
+    subgraph SOURCES["📡 STEP 1 — Data Sources (poll every 15–30 min)"]
+        A1["ClinicalTrials.gov API<br/>(structured JSON)"]
+        A2["bioRxiv / medRxiv API<br/>(free-text abstracts)"]
+        A3["Semantic Scholar API<br/>(conference abstracts, optional)"]
+    end
+
+    subgraph INGEST["🧹 STEP 2 — Ingestion & Normalization"]
+        B1["Fetch + dedupe<br/>(by DOI / NCT ID / title hash)"]
+        B2["Normalize into common schema:<br/>{drug, disease, source, date, url}"]
+    end
+
+    subgraph EXTRACT["🔍 STEP 3 — Entity Extraction"]
+        C1["Structured sources:<br/>fields already clean, skip NER"]
+        C2["Unstructured text:<br/>Claude API → JSON extraction<br/>(drug, disease, mechanism)"]
+        C3["Normalize drug names → RxNorm/DrugCentral<br/>Normalize disease names → MeSH"]
+    end
+
+    subgraph TRUTH["📚 STEP 4 — Ground Truth"]
+        D1["Open Targets / DrugCentral API<br/>'What is this drug already approved for?'"]
+    end
+
+    subgraph COMPARE["⚖️ STEP 5 — Arbitrage / Comparison Engine"]
+        E1{"Is this disease already<br/>in the drug's approved list?"}
+        E2["❌ Not new — discard"]
+        E3["✅ New pairing found<br/>→ candidate repurposing signal"]
+    end
+
+    subgraph SCORE["🏆 STEP 6 — Scoring"]
+        F1["Weight by: source type, trial phase,<br/>recency, number of independent mentions"]
+        F2["Save as ranked Signal record"]
+    end
+
+    subgraph STORE["🗄️ STEP 7 — Storage"]
+        G1[("Postgres<br/>signals + documents + drug/disease refs")]
+    end
+
+    subgraph SERVE["🖥️ STEP 8 — Serving & Demo"]
+        H1["FastAPI backend<br/>/signals /signals/:drug /search"]
+        H2["React dashboard<br/>ranked feed + drug↔disease graph"]
+        H3["Validate against known cases<br/>(metformin→cancer, sildenafil, thalidomide)"]
+    end
+
+    A1 --> B1
+    A2 --> B1
+    A3 --> B1
+    B1 --> B2
+    B2 --> C1
+    B2 --> C2
+    C1 --> C3
+    C2 --> C3
+    C3 --> E1
+    D1 --> E1
+    E1 -- No --> E2
+    E1 -- Yes --> E3
+    E3 --> F1
+    F1 --> F2
+    F2 --> G1
+    G1 --> H1
+    H1 --> H2
+    G1 --> H3
+
+    classDef source fill:#1a2332,stroke:#3d5a80,color:#e6edf3
+    classDef process fill:#16211c,stroke:#3d8361,color:#e6edf3
+    classDef decision fill:#2a1f14,stroke:#c9852f,color:#e6edf3
+    classDef discard fill:#2a1414,stroke:#8b3a3a,color:#e6edf3
+    classDef signal fill:#132a28,stroke:#4fd1c5,color:#e6edf3
+    classDef store fill:#1c1a2e,stroke:#7c6fd6,color:#e6edf3
+
+    class A1,A2,A3 source
+    class B1,B2,C1,C2,C3,D1 process
+    class E1 decision
+    class E2 discard
+    class E3,F1,F2 signal
+    class G1 store
+    class H1,H2,H3 process
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="card">
+      <h3>Hackathon build order</h3>
+      <p>Build top-to-bottom, left-to-right in the diagram. Get Steps 1–5 working with ONE source (ClinicalTrials.gov) before adding bioRxiv. The comparison engine (Step 5) is your core IP — prioritize it over more sources or UI polish.</p>
+    </div>
+    <div class="card">
+      <h3>Cut-list if short on time</h3>
+      <p>Drop Semantic Scholar first, then the graph visualization, then bioRxiv/Claude extraction. Never cut the comparison engine or the validation step — that's what proves the system actually works.</p>
+    </div>
+    <div class="card">
+      <h3>Key APIs (all free)</h3>
+      <p>ClinicalTrials.gov v2, bioRxiv/medRxiv, Open Targets GraphQL, DrugCentral/RxNorm, Semantic Scholar, Anthropic API for text extraction.</p>
+    </div>
+    <div class="card">
+      <h3>Demo moment</h3>
+      <p>Show a live-detected signal, click through to its source trial/paper, then show the system independently rediscovering a known case (metformin → cancer) to prove it's not just showing noise.</p>
+    </div>
+  </div>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: "dark", securityLevel: "loose" });
+</script>
+</body>
+</html>
