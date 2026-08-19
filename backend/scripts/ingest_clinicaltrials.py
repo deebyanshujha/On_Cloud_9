@@ -1,8 +1,12 @@
-"""Step 3 sanity-check script: pull real ClinicalTrials.gov data for a
-handful of drugs, store it in the database, and print a summary — including
-whether the diseases we already know about from Step 2's hardcoded fixture
-(pancreatic cancer for metformin, pulmonary hypertension for sildenafil)
-actually show up in the real data.
+"""ClinicalTrials.gov discovery-mode sanity-check script (Step 10).
+
+Scans recent ClinicalTrials.gov studies broadly (no drug filter — see
+app/ingestion/clinicaltrials.py's `discover()`), extracts every
+(drug, condition) pair found, stores them, and merges every discovered
+drug name into the persistent known-drugs cache.
+
+Scan size / time window are runtime-configurable via env vars
+(ARB_MAX_RESULTS_PER_SOURCE, ARB_TIME_WINDOW_DAYS) — see app/core/config.py.
 
 Run from backend/: py scripts/ingest_clinicaltrials.py
 """
@@ -13,16 +17,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.ingestion.clinicaltrials import ingest_drug
-from app.ingestion.store import upsert_documents
+from app.core.config import MAX_RESULTS_PER_SOURCE, TIME_WINDOW_DAYS
+from app.ingestion.clinicaltrials import discover
+from app.ingestion.store import upsert_documents, upsert_known_drug
 from app.models.db import SessionLocal, init_db
-
-DRUGS_TO_INGEST = ["metformin", "sildenafil"]
-
-KNOWN_DISEASES_TO_LOOK_FOR = {
-    "metformin": "pancreatic cancer",
-    "sildenafil": "pulmonary hypertension",
-}
 
 
 def main() -> None:
@@ -30,21 +28,19 @@ def main() -> None:
     session = SessionLocal()
 
     try:
-        for drug in DRUGS_TO_INGEST:
-            print(f"Fetching ClinicalTrials.gov studies for '{drug}'...")
-            documents = ingest_drug(drug, max_studies=200)
-            print(f"  Parsed {len(documents)} drug-disease documents.")
+        print(
+            f"Scanning ClinicalTrials.gov for studies posted in the last "
+            f"{TIME_WINDOW_DAYS} days (up to {MAX_RESULTS_PER_SOURCE} studies)..."
+        )
+        documents = discover(max_studies=MAX_RESULTS_PER_SOURCE)
+        print(f"  Parsed {len(documents)} drug-disease documents.")
 
-            inserted, skipped = upsert_documents(session, documents)
-            print(f"  Stored: {inserted} new, {skipped} already in DB (skipped).")
+        inserted, skipped = upsert_documents(session, documents)
+        print(f"  Stored: {inserted} new, {skipped} already in DB (skipped).")
 
-            diseases_seen = {d.normalized_disease() for d in documents}
-            target = KNOWN_DISEASES_TO_LOOK_FOR.get(drug)
-            if target:
-                found = target in diseases_seen
-                marker = "FOUND" if found else "not found"
-                print(f"  Sanity check: '{target}' in real data -> {marker}")
-            print()
+        discovered_drugs = sorted({upsert_known_drug(session, d.drug) for d in documents})
+        print(f"  Discovered {len(discovered_drugs)} distinct drug(s): {discovered_drugs[:20]}"
+              f"{'...' if len(discovered_drugs) > 20 else ''}")
     finally:
         session.close()
 

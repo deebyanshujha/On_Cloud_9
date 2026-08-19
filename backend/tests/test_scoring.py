@@ -58,3 +58,35 @@ def test_score_is_between_zero_and_one():
 
     for s in signals:
         assert 0.0 <= s.score <= 1.0
+
+
+def test_min_score_filters_low_confidence_signals():
+    documents, approved = load_known_cases()
+
+    all_signals = run_comparison(documents, approved, today=date(2026, 8, 19), min_score=0.0)
+    filtered = run_comparison(documents, approved, today=date(2026, 8, 19), min_score=0.9)
+
+    assert len(filtered) <= len(all_signals)
+    assert all(s.score >= 0.9 for s in filtered)
+
+
+def test_scales_to_many_distinct_drugs_without_capping_result_count():
+    from app.schemas.document import ApprovedIndication, Document
+
+    documents = [
+        Document(
+            drug=f"drug-{i}",
+            disease=f"disease-{i}",
+            source="clinicaltrials",
+            source_id=f"NCT-SCALE-{i}",
+            phase="phase 2",
+            date=date(2026, 1, 1),
+        )
+        for i in range(50)
+    ]
+    approved: list[ApprovedIndication] = []
+
+    signals = run_comparison(documents, approved, today=date(2026, 8, 19))
+
+    assert len(signals) == 50
+    assert len({s.drug for s in signals}) == 50

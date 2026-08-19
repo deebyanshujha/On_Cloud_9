@@ -24,6 +24,42 @@ class Base(DeclarativeBase):
 
 
 def init_db() -> None:
-    from app.models import approved_indication, document  # noqa: F401  (registers the tables)
+    from app.models import (  # noqa: F401  (registers the tables)
+        approved_indication,
+        case,
+        document,
+        ingestion_status,
+        known_drug,
+    )
 
     Base.metadata.create_all(bind=engine)
+    _migrate_add_missing_columns()
+
+
+def _migrate_add_missing_columns() -> None:
+    """SQLite has no ALTER-TABLE-driven ORM migration story, and this
+    project's dev DB is a single checked-in file rather than something
+    recreated from scratch each time. `create_all` only creates tables that
+    don't exist yet — it never adds a column to a table that's already
+    there. So when a table gains a new nullable column (e.g. the TheraLens
+    safety-context fields on approved_indications), add it here via a plain
+    `ALTER TABLE ... ADD COLUMN`, which SQLite supports for nullable
+    columns with no default. Idempotent: skipped if the column already
+    exists."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
+    for table in Base.metadata.tables.values():
+        if table.name not in existing_tables:
+            continue
+        existing_columns = {c["name"] for c in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in existing_columns:
+                continue
+            col_type = column.type.compile(engine.dialect)
+            with engine.begin() as conn:
+                conn.execute(
+                    text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {col_type}')
+                )

@@ -1,17 +1,15 @@
-"""Step 4 sanity-check script: pull real openFDA Drug Label data for a
-handful of drugs, store it in the database, and print each approved
-indications paragraph so we can visually confirm the diseases Step 2's
-hardcoded fixture flags as "new" (pancreatic cancer for metformin,
-pulmonary hypertension for sildenafil) do NOT already show up as approved
-uses — i.e. these really are candidate repurposing pairings, not
-already-approved ones we'd be re-flagging by mistake.
+"""openFDA reactive-lookup sanity-check script (Step 10).
 
-This is a print-and-eyeball check, not a real matching algorithm — the
-substring search below is a rough approximation. Real matching (handling
-things like "Stage IV Pancreatic Cancer" vs "pancreatic cancer") is Step 5's
-job, per app/ingestion/openfda.py's docstring.
+Unlike ClinicalTrials.gov/Europe PMC, openFDA genuinely needs a drug name
+to look up its label — there's nothing to "discover" here. So this script
+doesn't scan anything broadly: it looks up every drug already sitting in
+the persistent known-drugs cache (populated by
+scripts/ingest_clinicaltrials.py / scripts/ingest_biorxiv.py), one openFDA
+label lookup per drug, reactively.
 
 Run from backend/: py scripts/ingest_openfda.py
+(requires the known-drugs cache to be non-empty — run the two discovery
+scripts above at least once first)
 """
 from __future__ import annotations
 
@@ -21,18 +19,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.ingestion.openfda import ingest_drug
-from app.ingestion.store import upsert_approved_indications
+from app.ingestion.store import load_all_known_drugs, upsert_approved_indications
 from app.models.db import SessionLocal, init_db
-
-DRUGS_TO_INGEST = ["metformin", "sildenafil"]
-
-# Diseases we do NOT expect to find in these drugs' approved indications —
-# if one of these turns up, it means the drug is already approved for it,
-# and it isn't the "surprising new pairing" Step 2's fixture claims it is.
-UNEXPECTED_DISEASES_TO_CHECK = {
-    "metformin": "pancreatic cancer",
-    "sildenafil": "pulmonary hypertension",
-}
 
 
 def main() -> None:
@@ -40,26 +28,22 @@ def main() -> None:
     session = SessionLocal()
 
     try:
-        for drug in DRUGS_TO_INGEST:
-            print(f"Fetching openFDA labels for '{drug}'...")
-            indications = ingest_drug(drug, limit=10)
-            print(f"  Parsed {len(indications)} approved-indication label(s).")
+        drugs = load_all_known_drugs(session)
+        if not drugs:
+            print(
+                "No drugs in the known-drugs cache yet — run "
+                "scripts/ingest_clinicaltrials.py and/or scripts/ingest_biorxiv.py first."
+            )
+            return
 
+        print(f"Looking up openFDA labels for {len(drugs)} known drug(s)...")
+        for drug in drugs:
+            indications = ingest_drug(drug)
             inserted, skipped = upsert_approved_indications(session, indications)
-            print(f"  Stored: {inserted} new, {skipped} already in DB (skipped).")
-
-            print("  Approved indications text (for visual review):")
-            for indication in indications:
-                print(f"    [{indication.source_id}] {indication.disease}")
-                print()
-
-            unexpected = UNEXPECTED_DISEASES_TO_CHECK.get(drug)
-            if unexpected:
-                combined_text = " ".join(i.normalized_disease() for i in indications)
-                found = unexpected in combined_text
-                marker = "FOUND (not a new pairing!)" if found else "not found (still a candidate)"
-                print(f"  Sanity check: '{unexpected}' in approved text -> {marker}")
-            print()
+            print(
+                f"  {drug}: {len(indications)} label(s) found "
+                f"({inserted} new, {skipped} already in DB)"
+            )
     finally:
         session.close()
 

@@ -28,4 +28,10 @@ class ApprovedIndicationRecord(Base):
     source: Mapped[str] = mapped_column(String, index=True)
     source_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     url: Mapped[str | None] = mapped_column(String, nullable=True)
+    # TheraLens phase: raw label safety-context text, same "store as-is, no
+    # fabrication" pattern as `disease` (indications_and_usage). Null when
+    # openFDA didn't return the field for this label.
+    contraindications: Mapped[str | None] = mapped_column(String, nullable=True)
+    warnings: Mapped[str | None] = mapped_column(String, nullable=True)
+    drug_interactions: Mapped[str | None] = mapped_column(String, nullable=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

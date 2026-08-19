@@ -33,13 +33,20 @@ class Document(BaseModel):
 
 
 class ApprovedIndication(BaseModel):
-    """Ground truth: a disease a drug is already FDA-approved to treat."""
+    """Ground truth: a disease a drug is already FDA-approved to treat, plus
+    (TheraLens phase) the label's safety-context fields — contraindications,
+    warnings, and drug_interactions — stored as raw paragraph text, same
+    pattern as `disease` (indications_and_usage). No structuring/fabrication:
+    a field is None when openFDA simply didn't return it for this label."""
 
     drug: str
     disease: str
     source: GroundTruthSource = "openfda"
     source_id: Optional[str] = None
     url: Optional[str] = None
+    contraindications: Optional[str] = None
+    warnings: Optional[str] = None
+    drug_interactions: Optional[str] = None
 
     def normalized_drug(self) -> str:
         return self.drug.strip().lower()

@@ -5,11 +5,25 @@ duplicates.
 """
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.drug_normalization import normalize_drug_name, resolve_rxnorm_id
+from app.core.scoring import normalize as normalize_disease_text
 from app.models.approved_indication import ApprovedIndicationRecord
+from app.models.case import (
+    CaseAnalysisRecord,
+    CaseConditionRecord,
+    CaseEvidenceCheckRecord,
+    CaseMedicationRecord,
+    CaseRecord,
+    CaseSnapshotRecord,
+)
 from app.models.document import DocumentRecord
+from app.models.ingestion_status import IngestionStatusRecord
+from app.models.known_drug import KnownDrugRecord
 from app.schemas.document import ApprovedIndication, Document
 
 
@@ -95,12 +109,234 @@ def upsert_approved_indications(
                 source=indication.source,
                 source_id=indication.source_id,
                 url=indication.url,
+                contraindications=indication.contraindications,
+                warnings=indication.warnings,
+                drug_interactions=indication.drug_interactions,
             )
         )
         inserted += 1
 
     session.commit()
     return inserted, skipped
+
+
+def upsert_known_drug(
+    session: Session, raw_name: str, resolve_rxnorm: bool = True
+) -> str:
+    """Merges a raw discovered drug/intervention name into the persistent
+    known-drugs cache: same canonical name -> same row (variant appended,
+    `last_seen` bumped), new canonical name -> new row. Returns the
+    canonical name so callers (openFDA reactive lookup, discovery ingestion)
+    can key off it. Never resets/replaces the table — it only grows or
+    merges across runs."""
+    canonical = normalize_drug_name(raw_name)
+    if not canonical:
+        return canonical
+
+    record = session.execute(
+        select(KnownDrugRecord).where(KnownDrugRecord.canonical_name == canonical)
+    ).scalar_one_or_none()
+
+    raw_stripped = raw_name.strip()
+
+    if record is None:
+        rxnorm_id = resolve_rxnorm_id(canonical) if resolve_rxnorm else None
+        record = KnownDrugRecord(
+            canonical_name=canonical,
+            name_variants=json.dumps([raw_stripped]),
+            rxnorm_id=rxnorm_id,
+        )
+        session.add(record)
+    else:
+        variants = json.loads(record.name_variants)
+        if raw_stripped not in variants:
+            variants.append(raw_stripped)
+            record.name_variants = json.dumps(variants)
+        if record.rxnorm_id is None and resolve_rxnorm:
+            record.rxnorm_id = resolve_rxnorm_id(canonical)
+
+    session.commit()
+    return canonical
+
+
+def load_all_known_drugs(session: Session) -> list[str]:
+    """Returns every canonical drug name accumulated in the cache so far,
+    across all runs — not just the ones discovered in the current run."""
+    records = session.execute(select(KnownDrugRecord.canonical_name)).scalars().all()
+    return list(records)
+
+
+def record_source_status(
+    session: Session,
+    source: str,
+    status: str,
+    message: str | None = None,
+    items_ingested: int = 0,
+) -> None:
+    """Overwrites the one status row per source (Step 10 fallback
+    behavior). Called after every discovery attempt, success or failure, so
+    a source that errors out never silently looks like it returned a
+    complete result — /status surfaces exactly this."""
+    record = session.execute(
+        select(IngestionStatusRecord).where(IngestionStatusRecord.source == source)
+    ).scalar_one_or_none()
+
+    if record is None:
+        record = IngestionStatusRecord(source=source)
+        session.add(record)
+
+    record.status = status
+    record.message = message
+    record.items_ingested = items_ingested
+    session.commit()
+
+
+def load_source_statuses(session: Session) -> list[IngestionStatusRecord]:
+    return list(session.execute(select(IngestionStatusRecord)).scalars().all())
+
+
+def create_case(
+    session: Session,
+    primary_condition: str,
+    comorbidities: list[str],
+    current_medications: list[str],
+) -> CaseRecord:
+    """Free-text case creation — no hardcoded disease/drug lists. Condition
+    text is normalized the same way every other disease mention already is
+    (`app.core.scoring.normalize`); medication text is normalized the same
+    way every other drug mention already is (`normalize_drug_name`) so a
+    case's medications line up with `known_drugs`/`documents` entities."""
+    case = CaseRecord(primary_condition=normalize_disease_text(primary_condition))
+    session.add(case)
+    session.flush()  # assigns case.id before children reference it
+
+    for name in comorbidities:
+        cleaned = normalize_disease_text(name)
+        if cleaned:
+            session.add(CaseConditionRecord(case_id=case.id, name=cleaned))
+
+    for name in current_medications:
+        cleaned = normalize_drug_name(name)
+        if cleaned:
+            session.add(CaseMedicationRecord(case_id=case.id, name=cleaned))
+
+    session.commit()
+    session.refresh(case)
+    return case
+
+
+def get_case(session: Session, case_id: int) -> CaseRecord | None:
+    return session.get(CaseRecord, case_id)
+
+
+def list_cases(session: Session) -> list[CaseRecord]:
+    """Newest-first — used by the frontend's Cases list and Dashboard
+    (Phase 2). Ordered by id, not created_at: SQLite's CURRENT_TIMESTAMP
+    default has only second resolution, so two cases created within the
+    same second would tie and sort unpredictably on created_at alone; id
+    (autoincrement) always reflects creation order exactly. No filtering/
+    pagination yet; fine for a case volume this project is expected to see
+    in this phase."""
+    return list(
+        session.execute(
+            select(CaseRecord).order_by(CaseRecord.id.desc())
+        ).scalars().all()
+    )
+
+
+def get_case_conditions(session: Session, case_id: int) -> list[str]:
+    rows = session.execute(
+        select(CaseConditionRecord.name).where(CaseConditionRecord.case_id == case_id)
+    ).scalars().all()
+    return list(rows)
+
+
+def get_case_medications(session: Session, case_id: int) -> list[str]:
+    rows = session.execute(
+        select(CaseMedicationRecord.name).where(CaseMedicationRecord.case_id == case_id)
+    ).scalars().all()
+    return list(rows)
+
+
+def set_case_saved(session: Session, case_id: int, saved: bool) -> CaseRecord | None:
+    case = session.get(CaseRecord, case_id)
+    if case is None:
+        return None
+    case.saved = saved
+    session.commit()
+    session.refresh(case)
+    return case
+
+
+def save_case_analysis(session: Session, case_id: int, result_json: str) -> None:
+    """Overwrites the one stored analysis per case — "last analysis
+    result," not a history table (see app/models/case.py)."""
+    record = session.execute(
+        select(CaseAnalysisRecord).where(CaseAnalysisRecord.case_id == case_id)
+    ).scalar_one_or_none()
+
+    if record is None:
+        record = CaseAnalysisRecord(case_id=case_id, result_json=result_json)
+        session.add(record)
+    else:
+        record.result_json = result_json
+
+    session.commit()
+
+
+def load_case_analysis(session: Session, case_id: int) -> CaseAnalysisRecord | None:
+    return session.execute(
+        select(CaseAnalysisRecord).where(CaseAnalysisRecord.case_id == case_id)
+    ).scalar_one_or_none()
+
+
+def save_case_snapshot(session: Session, case_id: int, result_json: str) -> None:
+    """Overwrites the one stored snapshot per case — taken when a case is
+    saved (see app/models/case.py's CaseSnapshotRecord docstring for why
+    this is distinct from the "last analysis")."""
+    record = session.execute(
+        select(CaseSnapshotRecord).where(CaseSnapshotRecord.case_id == case_id)
+    ).scalar_one_or_none()
+
+    if record is None:
+        record = CaseSnapshotRecord(case_id=case_id, result_json=result_json)
+        session.add(record)
+    else:
+        record.result_json = result_json
+
+    session.commit()
+
+
+def load_case_snapshot(session: Session, case_id: int) -> CaseSnapshotRecord | None:
+    return session.execute(
+        select(CaseSnapshotRecord).where(CaseSnapshotRecord.case_id == case_id)
+    ).scalar_one_or_none()
+
+
+def save_evidence_check(
+    session: Session, case_id: int, has_new_evidence: bool, result_json: str
+) -> None:
+    """Overwrites the one stored evidence-check result per case."""
+    record = session.execute(
+        select(CaseEvidenceCheckRecord).where(CaseEvidenceCheckRecord.case_id == case_id)
+    ).scalar_one_or_none()
+
+    if record is None:
+        record = CaseEvidenceCheckRecord(
+            case_id=case_id, has_new_evidence=has_new_evidence, result_json=result_json
+        )
+        session.add(record)
+    else:
+        record.has_new_evidence = has_new_evidence
+        record.result_json = result_json
+
+    session.commit()
+
+
+def load_evidence_check(session: Session, case_id: int) -> CaseEvidenceCheckRecord | None:
+    return session.execute(
+        select(CaseEvidenceCheckRecord).where(CaseEvidenceCheckRecord.case_id == case_id)
+    ).scalar_one_or_none()
 
 
 def load_all_approved_indications(session: Session) -> list[ApprovedIndication]:
@@ -112,6 +348,9 @@ def load_all_approved_indications(session: Session) -> list[ApprovedIndication]:
             source=r.source,
             source_id=r.source_id,
             url=r.url,
+            contraindications=r.contraindications,
+            warnings=r.warnings,
+            drug_interactions=r.drug_interactions,
         )
         for r in records
     ]

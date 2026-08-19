@@ -18,6 +18,102 @@ export interface Signal {
   sources: SourceLink[];
 }
 
+// --- TheraLens Cases (Phase 2) ----------------------------------------------
+
+export interface CaseOut {
+  id: number;
+  primary_condition: string;
+  comorbidities: string[];
+  current_medications: string[];
+  saved: boolean;
+  created_at: string;
+}
+
+export interface CaseSummary extends CaseOut {
+  last_analyzed_at: string | null;
+  candidate_count: number | null;
+  conflict_count: number | null;
+  top_research_priority_score: number | null;
+  has_new_evidence: boolean | null;
+  evidence_checked_at: string | null;
+}
+
+export type ConflictState = "conflict_detected" | "no_conflict_detected" | "insufficient_evidence";
+
+export interface ComorbidityCheck {
+  comorbidity: string;
+  status: ConflictState;
+  evidence: string | null;
+}
+
+export interface CurrentMedicationInteractionNote {
+  status: string;
+  note: string;
+}
+
+export interface CandidateOut {
+  drug: string;
+  research_priority_score: number;
+  evidence_strength_score: number;
+  known_indications: string[];
+  primary_condition_evidence: SourceLink[];
+  comorbidity_checks: ComorbidityCheck[];
+  current_medication_interactions: CurrentMedicationInteractionNote;
+  reasoning_trail: string[];
+  research_framing: string;
+}
+
+export interface AnalysisResult {
+  case_id: number;
+  primary_condition: string;
+  analyzed_at: string;
+  candidates: CandidateOut[];
+}
+
+// --- TheraLens: evidence re-check (Phase 3) ---------------------------------
+// Manually-triggered diff of a saved case's snapshot against a fresh
+// re-analysis — not continuous background monitoring (see PROGRESS.md).
+
+export interface CandidateChange {
+  drug: string;
+  is_new_candidate: boolean;
+  evidence_tier_before: string | null;
+  evidence_tier_after: string;
+  evidence_score_before: number | null;
+  evidence_score_after: number;
+  new_supporting_source_ids: string[];
+  newly_conflicted_comorbidities: string[];
+  summary: string;
+}
+
+export interface EvidenceCheckResult {
+  case_id: number;
+  primary_condition: string;
+  snapshot_analyzed_at: string | null;
+  checked_at: string;
+  has_new_evidence: boolean;
+  changes: CandidateChange[];
+  message: string;
+}
+
+export interface RecheckAllResult {
+  checked_count: number;
+  cases_with_new_evidence_count: number;
+  results: EvidenceCheckResult[];
+}
+
+export interface CaseWithAnalysis {
+  case: CaseOut;
+  last_analysis: AnalysisResult | null;
+  last_evidence_check: EvidenceCheckResult | null;
+}
+
+export interface CaseCreateInput {
+  primary_condition: string;
+  comorbidities: string[];
+  current_medications: string[];
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
 
 async function getJson<T>(path: string): Promise<T> {
@@ -28,10 +124,54 @@ async function getJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function sendJson<T>(path: string, method: "POST" | "PATCH", body?: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!response.ok) {
+    throw new Error(`${method} ${path} -> ${response.status}`);
+  }
+  return response.json() as Promise<T>;
+}
+
 export function fetchSignals(): Promise<Signal[]> {
   return getJson<Signal[]>("/signals");
 }
 
 export function searchSignals(query: string): Promise<Signal[]> {
   return getJson<Signal[]>(`/search?q=${encodeURIComponent(query)}`);
+}
+
+export function fetchSignalsForDrug(drug: string): Promise<Signal[]> {
+  return getJson<Signal[]>(`/signals/${encodeURIComponent(drug)}`);
+}
+
+export function listCases(): Promise<CaseSummary[]> {
+  return getJson<CaseSummary[]>("/cases");
+}
+
+export function getCase(id: number): Promise<CaseWithAnalysis> {
+  return getJson<CaseWithAnalysis>(`/cases/${id}`);
+}
+
+export function createCase(input: CaseCreateInput): Promise<CaseOut> {
+  return sendJson<CaseOut>("/cases", "POST", input);
+}
+
+export function analyzeCase(id: number): Promise<AnalysisResult> {
+  return sendJson<AnalysisResult>(`/cases/${id}/analyze`, "POST");
+}
+
+export function setCaseSaved(id: number, saved: boolean): Promise<CaseOut> {
+  return sendJson<CaseOut>(`/cases/${id}`, "PATCH", { saved });
+}
+
+export function recheckCase(id: number): Promise<EvidenceCheckResult> {
+  return sendJson<EvidenceCheckResult>(`/cases/${id}/recheck`, "POST");
+}
+
+export function recheckAllCases(): Promise<RecheckAllResult> {
+  return sendJson<RecheckAllResult>("/cases/recheck-all", "POST");
 }

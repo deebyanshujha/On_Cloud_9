@@ -14,6 +14,7 @@ from collections import defaultdict
 from datetime import date
 from typing import Iterable
 
+from app.core.config import MIN_CONFIDENCE_SCORE
 from app.core.disease_matching import diseases_match, is_junk_condition
 from app.schemas.document import ApprovedIndication, Document, Signal
 
@@ -158,11 +159,15 @@ def run_comparison(
     documents: Iterable[Document],
     approved: Iterable[ApprovedIndication],
     today: date | None = None,
+    min_score: float | None = None,
 ) -> list[Signal]:
     """The core arbitrage step: for every observed (drug, disease) pair not
     already in the approved-indications ground truth, produce a scored
-    Signal. Returns signals sorted by score, highest first."""
+    Signal. Signals scoring below `min_score` (default: config's
+    MIN_CONFIDENCE_SCORE) are dropped before returning. Returns signals
+    sorted by score, highest first."""
     today = today or date.today()
+    min_score = MIN_CONFIDENCE_SCORE if min_score is None else min_score
 
     documents = list(documents)
     approved = list(approved)
@@ -178,6 +183,8 @@ def run_comparison(
             continue  # not new — this drug is already approved for this disease
 
         score, reasons = score_pair(docs, today)
+        if score < min_score:
+            continue
         signals.append(
             Signal(
                 drug=drug,
