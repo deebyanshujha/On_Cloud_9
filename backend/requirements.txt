@@ -4,8 +4,8 @@ sqlalchemy>=2.0
 httpx>=0.27
 
 # Added in step 6 (NER, no LLM APIs):
-spacy>=3.8
-scispacy>=0.6
+spacy>=3.7,<3.8
+scispacy==0.5.5
 # scispaCy's disease/chemical NER model isn't a normal PyPI package — pip
 # install it directly from its release URL (not resolvable via this file):
 #   pip install "https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_ner_bc5cdr_md-0.5.4.tar.gz"
