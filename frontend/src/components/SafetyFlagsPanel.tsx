@@ -37,7 +37,12 @@ export default function SafetyFlagsPanel({ candidates }: Props) {
                 <div className="safety-flag-title">
                   <strong>{f.drug}</strong> vs. comorbidity <strong>{f.comorbidity}</strong>
                 </div>
-                {f.evidence && <div className="safety-flag-evidence">&ldquo;{f.evidence}&rdquo;</div>}
+                {f.evidence && (
+                  <>
+                    <div className="safety-flag-evidence">&ldquo;{f.evidence}&rdquo;</div>
+                    <div className="safety-flag-source">Source: FDA drug label (contraindications/warnings)</div>
+                  </>
+                )}
                 <div className="safety-flag-note">Clinical review required.</div>
               </div>
             </li>

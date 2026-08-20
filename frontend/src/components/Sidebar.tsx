@@ -10,8 +10,8 @@ const NAV_ITEMS: NavItem[] = [
   { path: "/", label: "Dashboard", match: (p) => p === "/" },
   { path: "/cases", label: "Cases", match: (p) => p === "/cases" || p.startsWith("/cases/") },
   { path: "/evidence", label: "Evidence Explorer", match: (p) => p === "/evidence" },
-  { path: "/drugs", label: "Drug Explorer", match: (p) => p === "/drugs" },
-  { path: "/signals", label: "Research Signals", match: (p) => p === "/signals" },
+  { path: "/drugs", label: "Drug Intelligence", match: (p) => p === "/drugs" },
+  { path: "/signals", label: "Research Radar", match: (p) => p === "/signals" },
 ];
 
 interface Props {

@@ -25,6 +25,14 @@ class KnownDrugRecord(Base):
     # not used for matching (matching always goes through canonical_name).
     name_variants: Mapped[str] = mapped_column(String, default="[]")
     rxnorm_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # "drug" | "drug_class" | "rejected" — see
+    # app.core.drug_normalization.DRUG_CLASS_ALLOWLIST /
+    # is_valid_medication_entity. Nullable (not NOT NULL): the sqlite
+    # ADD-COLUMN migration in app/models/db.py can't backfill existing
+    # rows, so historical rows predating this column have no value here —
+    # treat null the same as "drug" when reading. New rows always get one
+    # via upsert_known_drug's default="drug" argument.
+    entity_type: Mapped[str | None] = mapped_column(String, nullable=True, default="drug")
     first_seen: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_seen: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()

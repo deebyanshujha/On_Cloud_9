@@ -1,6 +1,6 @@
 # Progress Log — Real-Time Biotech Arbitrage Engine
 
-_Last updated: 2026-08-19 — after TheraLens Phase 3 (new-evidence detection for saved cases, detail at the bottom of this file)_
+_Last updated: 2026-08-20 — after the TheraLens major-redesign Phase A (backend data-quality/API foundations, detail at the bottom of this file)_
 
 ## What is this project, in plain terms?
 
@@ -1550,3 +1550,583 @@ check-all action), `src/pages/CasesList.tsx` (+badge), `src/index.css`
 
 123 existing tests (all still passing, unmodified) + 17 new Phase 3 tests
 = **140 passing, 0 failing.**
+
+## TheraLens major redesign — Phase A: backend data-quality/API foundations (2026-08-20)
+
+The user asked for a major, ground-up product redesign of TheraLens around
+one question: *"given a clinical condition and the patient's other
+conditions/medications, are there existing drugs with emerging evidence
+worth investigating, and are there reasons to be cautious?"* — a research
+intelligence tool, never a prescription/recommendation engine. This is a
+large, multi-part redesign; it's being done in phases. **Phase A (this
+section) is backend-only**: fixing the medication/disease data-quality
+problems at the source, adding clean autocomplete endpoints, and tightening
+the case-analysis API. Phase B (frontend redesign — Dashboard, Drug
+Explorer, Research Signals, the network graph, case pages) is a separate,
+later pass.
+
+### Root cause: "medications" that aren't medications
+
+`app/ingestion/clinicaltrials.py`'s `extract_drug_names()` already filtered
+ClinicalTrials.gov interventions to `type == "DRUG"` only (see Step 10) —
+but CT.gov sponsors routinely tag placebo/comparator arms, "Standard of
+Care", bare cohort/part labels, and even stray protocol sentences as
+intervention type `"DRUG"` too. That's a real quirk in CT.gov's own
+taxonomy, not a bug in the existing type filter. So garbage like `"Placebo"`
+or `"Pemefolacianib Cohort 1 In Part A"` was being stored and surfaced as if
+it were a real medication — visible in the old Drug Explorer's list and in
+the New Case form's medication autocomplete (which derived its options
+straight from ingested `/signals` data with no cleanup at all).
+
+**Fix — `app/core/drug_normalization.py`:**
+- `is_junk_drug_name(raw)` — a deterministic, no-network reject check:
+  exact matches against a curated non-drug list (placebo/comparator/sham,
+  standard-of-care/observation, surgery/procedure/device/behavioral/dietary/
+  educational/diet/guideline/questionnaire/exercise), bare cohort/arm/
+  part/group labels with nothing substantive left after stripping, and a
+  length heuristic (>8 words = protocol/description text that leaked into
+  the intervention field, same spirit as `disease_matching.py`'s
+  `is_junk_condition`).
+- A new trailing-filler regex (`_TRAILING_FILLER_RE`) strips cohort/arm/
+  part/group suffixes the same way the existing leading-filler regex
+  already strips "Dose reduction of X" — now wired into `normalize_drug_name`
+  itself, so `"Pemefolacianib Cohort 1 In Part A"` normalizes to
+  `"pemefolacianib"` instead of keeping the trial-structure noise.
+- `is_valid_medication_entity(canonical_name)` — a stronger, authoritative
+  gate: true only if the name resolves via the already-existing
+  `resolve_rxnorm_id()` (RxNav) or is one of a small curated
+  `DRUG_CLASS_ALLOWLIST` (`5-asa`, `glp-1 receptor agonists`, `sglt2
+  inhibitors`, `ace inhibitors`, `beta blockers`, `statins` — real
+  drug-class terms RxNorm won't resolve as a single ingredient). **Not**
+  wired into live discovery ingestion (network-gating every discovered drug
+  against RxNav in real time, once per study per run, would be slow and
+  flaky for no real benefit over the reject-list already applied at
+  ingestion time) — used instead in the autocomplete endpoints and as an
+  informational (non-deleting) signal in the cleanup script below.
+- `is_junk_drug_name` is now wired into `extract_drug_names()` (rejects
+  before normalizing) and `store.py`'s `upsert_known_drug()` (rejects
+  before a row ever enters the persistent `known_drugs` cache).
+- `KnownDrugRecord` gained an `entity_type` column (`"drug"` /
+  `"drug_class"` / `"rejected"`, nullable — the sqlite ADD-COLUMN migration
+  can't backfill existing rows, so historical rows read as null/"drug").
+
+### Retroactive cleanup — `scripts/clean_junk_medications.py`
+
+Same safety pattern as the existing `clear_legacy_bulk_data.py`: dry-run by
+default, `--apply` required, backs up the whole DB file (timestamped
+`.bak`) and dumps every deleted row to JSON before deleting anything.
+**Deliberately conservative deletion criterion**: only `is_junk_drug_name()`
+triggers a delete — NOT a failed RxNorm lookup. RxNorm not recognizing a
+name is inherently ambiguous (many real trial-stage compounds simply aren't
+in RxNorm yet, and a transient network hiccup looks identical to "not
+found"), so deleting on that signal risked purging real medications. RxNorm
+resolution is reported for visibility only (a "didn't resolve, kept, worth
+a manual look" list), never used to delete.
+
+**Run for real against `backend/data/arbitrage.db` (2026-08-20):**
+
+| | before | after |
+|---|---|---|
+| documents | 210 | **197** |
+| distinct drugs | 63 | **60** |
+
+13 junk documents removed (3 distinct junk drug values: `"placebo"` and two
+spelling variants of `"rapid esc-guideline based secondary prevention
+following myocardial infaction"` — a full protocol-title sentence that had
+leaked into the intervention field). 2 junk `known_drugs` cache rows
+removed. 0 junk `case_medications` rows (none existed yet). Backup files:
+`data/arbitrage.db.20260820T060821Z.bak`,
+`data/junk_medications_backup_20260820T060821Z.json`. Remaining medications
+sampled clean: `atorvastatin`, `dopamine`, `5-asa`, etc. — real drug/
+drug-class names. **Known leftover, flagged not fixed**: ~37 surviving drug
+values don't resolve via RxNorm (short abbreviations like `"ad"`/`"ai"`/
+`"atl"`/`"ee"`/`"mda"`, a few unnormalized raw forms like `"dose reduction
+of lezertinib"` that predate the trailing-filler-regex fix, real
+trial-stage compound codes like `"bms-986511"`). None of these matched the
+deterministic junk-name criteria, so none were deleted — worth a follow-up
+look, not urgent (they don't dominate the dataset the way the old
+placebo/protocol-text entries did).
+
+### Clean autocomplete — `app/core/terminology.py`, `GET /medications/search`, `GET /conditions/search`
+
+The old autocomplete (`frontend/src/hooks/useEntityIndex.ts`) derived
+suggestions purely from ingested `/signals` data — both dirty (garbage drug
+names, now largely fixed above) and, for diseases, actively wrong (it
+included `.approved_for`, which is raw openFDA `indications_and_usage`
+*paragraph* text, not a clean disease name). Rather than trying to clean
+ingested data into a search index, two new endpoints call an external,
+authoritative, purpose-built terminology source instead — same "don't force
+one API to do every job" principle as the rest of this pipeline
+(ClinicalTrials.gov for trials, openFDA for labels, Europe PMC for
+literature):
+
+- **NLM Clinical Table Search Service** (`clinicaltables.nlm.nih.gov`) — a
+  free, no-login REST API from the National Library of Medicine, consistent
+  with this project's "no paid/login APIs" constraint. `GET
+  /medications/search?q=` calls its **RxTerms** table (curated specifically
+  for prescribing/autocomplete use cases — excludes placebo-style noise by
+  construction). `GET /conditions/search?q=` calls its **conditions** table
+  (ICD-10-CM-backed clean disease/condition names).
+- Both return `{results: [{name}], source_unavailable: bool}` — never a raw
+  label paragraph, trial title, or abstract. Verified live: `q=met` returns
+  clean names like `"metFORMIN (Oral Pill)"`, `"Metoprolol"`,
+  `"Methotrexate"`; `q=heart` returns `"Congestive heart failure (CHF)"`,
+  `"Heart attack (myocardial infarction)"`, etc.
+- Never raises on a network failure — same never-raises spirit as the
+  existing `resolve_rxnorm_id()` — returns an empty result list plus
+  `source_unavailable: true` instead of a 500.
+- Frontend wiring (replacing `useEntityIndex.ts`'s New Case form usage) is
+  Phase B's job, not done here.
+
+### Case analysis tightened
+
+- **Candidates are now capped.** `MAX_CANDIDATES_PER_CASE` (env var
+  `ARB_MAX_CANDIDATES_PER_CASE`, default 10, same config pattern as every
+  other knob in `app/core/config.py`) — `analyze_case()` now returns at most
+  this many candidates, highest `research_priority_score` first, instead of
+  every matching signal unbounded. A case page should answer "what's worth
+  investigating," not enumerate every signal that happens to match.
+- **`CandidateOut` gained `evidence_tier` and `evidence_tier_reason`.**
+  Previously the frontend had to recompute the tier itself from
+  `evidence_strength_score`; now the backend returns the same
+  `evidence_tier()` classification it already uses internally, plus a short
+  human-readable reason built from real counts on the signal's supporting
+  documents (e.g. `"3 clinical trials, 2 publications"` — never a
+  fabricated explanation).
+
+### Duplicate-case prevention
+
+The old Dashboard showed multiple identical "Pancreatic Cancer" cases
+because `create_case()` did no duplicate check at all. `CaseCreate` gained
+`allow_duplicate: bool = false`. `store.py`'s new `find_matching_case()`
+looks for an existing case with the exact same normalized primary
+condition AND the exact same comorbidity/medication sets (order-independent
+— free-text entry order shouldn't create a "different" case); if found and
+`allow_duplicate` isn't set, `POST /cases` returns the *existing* case (200,
+same id) instead of creating a lookalike. A case with even one different
+comorbidity is treated as a genuinely different research question, not a
+duplicate. Explicitly opting in with `allow_duplicate: true` still allows a
+deliberate second case.
+
+### Source-backed cross-case conflicts — `GET /cases/conflicts`
+
+The old Dashboard's "Safety Conflicts Detected" panel showed only a bare
+per-case count (`"Pancreatic Cancer — 5 conflicts"`), no drug, no source.
+The new endpoint reads every saved case's already-stored last-analysis JSON
+(no recomputation — same read-layer pattern as everything else in
+`main.py`) and flattens every `conflict_detected` comorbidity check across
+every saved case into `{case_id, primary_condition, drug, comorbidity,
+evidence_excerpt, source}` — enough for Phase B's dashboard to show "Drug X
+— potential conflict with Heart Failure — FDA label — [evidence excerpt]"
+instead of a bare number. Verified live end-to-end against real ingested
+data (metformin / renal impairment / a real openFDA contraindications
+excerpt) — correctly empty for unsaved cases, correctly populated once the
+case is saved.
+
+### Files changed/added
+
+**Backend, changed:** `app/core/drug_normalization.py` (+`is_junk_drug_name`,
++`is_valid_medication_entity`, +`DRUG_CLASS_ALLOWLIST`, +trailing-filler
+stripping wired into `normalize_drug_name`), `app/ingestion/clinicaltrials.py`
+(`extract_drug_names` rejects junk), `app/ingestion/store.py`
+(`upsert_known_drug` rejects junk + sets `entity_type`, +`find_matching_case`),
+`app/models/known_drug.py` (+`entity_type`), `app/core/case_analysis.py`
+(candidate capping, +evidence-tier fields), `app/core/config.py`
+(+`MAX_CANDIDATES_PER_CASE`), `app/schemas/case.py` (+`CandidateOut.
+evidence_tier`/`evidence_tier_reason`, +`CaseCreate.allow_duplicate`,
++`CaseConflictOut`), `app/schemas/api.py` (+`TerminologyEntry`/
+`TerminologySearchOut`), `app/main.py` (+`GET /medications/search`, +`GET
+/conditions/search`, +`GET /cases/conflicts`, duplicate-case handling in
+`POST /cases`). **Backend, new:** `app/core/terminology.py`,
+`scripts/clean_junk_medications.py`. **Tests, new:**
+`tests/test_terminology.py` (7 tests), `tests/test_clean_junk_medications.py`
+(4 tests), plus additions to `tests/test_drug_normalization.py` (11 tests),
+`tests/test_case_analysis.py` (2 tests), `tests/test_case_api.py` (9 tests),
+`tests/test_evidence_diff.py` (updated fixture for the new required
+`CandidateOut` fields).
+
+### Test count
+
+140 tests going into this phase + 47 new/updated = **187 passing, 0
+failing.**
+
+### Deferred to Phase B (frontend redesign), not done here
+
+Everything visual: Dashboard simplification (fewer raw counts, more "your
+cases" framing), Drug Explorer → "Drug Intelligence" redesign, Research
+Signals → "Research Radar" with real filters, replacing/reworking the
+unreadable full network graph with a focused expand-on-click view, wiring
+the New Case form's autocomplete to the new `/medications/search` and
+`/conditions/search` endpoints (currently still using the old
+`useEntityIndex.ts` client-side approach), and surfacing `GET
+/cases/conflicts` and the new `evidence_tier`/`evidence_tier_reason` fields
+in the UI. None of the backend groundwork above is wasted if Phase B lands
+later — every field/endpoint it needs already exists and is tested.
+
+## Data-balance audit + search overwhelm fix (2026-08-20)
+
+Three backend/UX issues raised, all suspected to trace back to the legacy
+metformin/sildenafil-only ingestion runs from before dynamic discovery
+existed (Step 10). Two were audited and fixed with tests; the third
+(wording) was audited and drafted as a proposal, not applied — the tone
+needs sign-off first.
+
+### 1. Data imbalance — audit and fix
+
+**Audit.** Queried `arbitrage.db` directly before touching anything:
+`documents` had 887 rows across 65 distinct drugs. `metformin` (342) and
+`sildenafil` (335) alone were 76% of all documents; the other 63 drugs
+shared the remaining 210. Confirmed the root cause structurally, not just
+by eyeballing timestamps: the `known_drugs` table (`app/models/known_drug.py`)
+is *only* ever written by discovery-mode ingestion
+(`app/ingestion/discovery.py` → `upsert_known_drug`) — a drug pulled in via
+the old single-drug scripts was never discovered, so it was never added
+there. Normalizing every `documents.drug` value the same way discovery does
+(`normalize_drug_name`) and checking membership against `known_drugs`
+showed **all 677 metformin/sildenafil documents had no `known_drugs` row at
+all** — every one of them came from the pre-Step-10 `ingest_drug()` calls
+(capped at 200 studies / 15 preprints *per drug*, back when the drug list
+was hardcoded to just these two), never from a fair discovery-budget run.
+Every other drug's documents came entirely from genuine Step 10 discovery
+runs. This matched the brief's hypothesis exactly: real data, structurally
+inflated by a since-retired ingestion mode that had a much bigger
+per-drug budget than the shared discovery budget that replaced it.
+
+**Fix, both halves (not either/or — they solve different problems):**
+
+- **`backend/scripts/clear_legacy_bulk_data.py`** (new). Identifies legacy
+  rows the same structural way the audit did (normalized drug not present
+  in `known_drugs`) rather than a hardcoded timestamp, so it stays correct
+  if run again later. Defaults to `--dry-run` (prints what it would delete);
+  `--apply` first backs up the whole DB file (timestamped `.bak`) and dumps
+  the exact rows being deleted to a JSON file in `backend/data/`, then
+  deletes them and prints before/after per-drug counts. Run for real against
+  `arbitrage.db`:
+
+  | | before | after |
+  |---|---|---|
+  | metformin | 342 | 0 |
+  | sildenafil | 335 | 0 |
+  | total documents | 887 | 210 |
+  | distinct drugs | 65 | 63 |
+
+  metformin/sildenafil drop to 0 because, per the structural definition,
+  every one of their documents was legacy — they simply haven't been
+  rediscovered by a Step 10 run since. Re-running discovery (`py
+  scripts/run_pipeline.py`) will naturally reintroduce them if a broad query
+  surfaces them again, this time under the same shared budget as every
+  other drug — which is the actual fix, not a permanent exclusion.
+  6 tests in `tests/test_clear_legacy_data.py` cover the cutoff-detection
+  logic against an isolated temp DB (never the real `arbitrage.db`).
+
+- **Fair per-drug document cap** (`app/core/config.py`'s new
+  `MAX_DOCUMENTS_PER_DRUG`, env var `ARB_MAX_DOCUMENTS_PER_DRUG`, default
+  **50**). This is the forward-looking half: it guards against the same
+  imbalance recurring from genuinely abundant *future* real data too — the
+  brief's own framing is that heavy real-world study volume for a common
+  drug isn't itself a bug. 50 was picked from the real post-cleanup
+  distribution (the most-documented dynamically-discovered drug currently
+  has 18 documents), giving ~3x headroom before the cap engages under
+  normal operation while still bounding runaway skew if one drug's document
+  count ever balloons again. Enforced in `app/core/scoring.py`'s new
+  `apply_fair_document_cap()`, called from `group_documents_by_pair()`
+  before pair-grouping: if a drug has more documents than the cap, only the
+  most recent N (by date) are kept, on the reasoning that freshest evidence
+  is what a live discovery feed should prioritize surfacing. Two new tests
+  in `tests/test_scoring.py` prove a synthetic drug with far more documents
+  than the cap doesn't get a disproportionate `supporting_documents`/signal
+  count over a drug that stays under it, and that the cap keeps the most
+  recent documents specifically (not an arbitrary subset).
+
+**Post-fix distribution** (top drugs by document count, after both
+changes): `atorvastatin` and `nnh` lead at 18 documents each, tapering
+smoothly down through `atl` (10), `prs` (9), several drugs at 7, etc. — no
+drug remotely dominates the dataset now; the top count (18) is well under
+the new fairness cap (50).
+
+### 2. Search results overwhelming — audit and fix
+
+**Audit.** `GET /search` (`app/main.py`) did an unranked substring match
+over every in-memory signal and returned the entire match list, no limit,
+no pagination. On the frontend, `frontend/src/pages/ResearchSignals.tsx`
+never even called it — `searchSignals()` was declared in `api.ts` but
+unused; the page instead fetched *all* signals once and filtered them
+client-side with the same unranked substring match, rendering an unbounded
+`cards-grid`. (`EvidenceExplorer.tsx`'s table was already reasonable — caps
+at 300 rows with a "showing first 300 of N" note — left untouched.)
+
+**Fix:**
+
+- `app/core/config.py` gained `SEARCH_RESULT_LIMIT` (env var
+  `ARB_SEARCH_RESULT_LIMIT`, default 20) — same env-var-config pattern as
+  the existing discovery-budget knobs (`MAX_RESULTS_PER_SOURCE` etc.), not a
+  new mechanism.
+- New `app/core/search.py::rank_search_results(signals, query)` — a pure,
+  independently-testable function. Ranks by match quality first (exact
+  match on drug/disease > starts-with > substring), then by the signal's
+  existing score, then by recency as a final tiebreak. 5 tests in
+  `tests/test_search.py`.
+- `GET /search` now takes `limit`/`offset` query params (default from
+  config, capped at 100) and returns a new `SearchResultsOut` shape
+  (`app/schemas/api.py`): `{results, total, limit, offset}` — enough for the
+  frontend to show "N of M" and page through without a second round-trip.
+  `tests/test_api.py`'s search tests updated for the new shape plus new
+  tests for limit/offset/ranking behavior.
+- Frontend: `api.ts`'s `searchSignals()` now actually calls the backend
+  `/search` endpoint (it never did before) with `limit`/`offset`.
+  `ResearchSignals.tsx` now debounces the search box (300ms) and, whenever
+  there's a non-empty query, fetches a ranked, bounded page from the
+  backend instead of filtering the full local list — with a "Load more (X
+  of Y)" button when more results exist. Empty-query browsing is unchanged
+  (that's not the "overwhelming" complaint — it's the existing full-list
+  view, left as-is). `npm run build` passes.
+
+### 3. Wording simplification — proposed, then approved and applied
+
+Audited the disclaimer, case-analysis reasoning trail
+(`app/core/case_analysis.py::_reasoning_trail`), and the evidence-diff
+summary strings (`app/core/evidence_diff.py`) for jargon-heavy phrasing,
+proposed 10 before/after examples, and — after user tone approval — applied
+all 10 to the actual source strings (not just this write-up):
+
+| Where | Before | After |
+|---|---|---|
+| `Disclaimer.tsx` | "This platform provides research intelligence and is not a medical diagnosis, prescription, or treatment recommendation." | "This is a research tool, not medical advice — it doesn't diagnose, prescribe, or recommend treatment." |
+| `case_analysis.py` reasoning trail | "New disease association surfaced: 'metformin' studied against 'pancreatic cancer', not among its recorded approved indications." | "'metformin' is being studied for 'pancreatic cancer', which it isn't currently approved to treat." |
+| `case_analysis.py` reasoning trail | "Known indication(s) on record: type 2 diabetes." | "Currently approved for: type 2 diabetes." |
+| `case_analysis.py` reasoning trail | "No approved indications on record for this drug (insufficient evidence)." | "We don't have approval records for this drug yet." |
+| `case_analysis.py` reasoning trail | "Evidence strength score (existing scoring engine): 0.72" | "Evidence strength: 0.72 (High)" — pairs the raw score with its tier via the existing `evidence_tier()` helper (title-cased for display), not a second tier-mapping function. |
+| `case_analysis.py` reasoning trail | "Context check — comorbidity 'renal impairment': conflict detected in label text — \"...\" — clinical review required." | "Possible conflict with 'renal impairment' — the drug label warns about this — \"...\" — a clinician should review it." |
+| `case_analysis.py` reasoning trail | "Context check — comorbidity 'X': no conflict detected in available contraindications/warnings text." | "No warning found for 'X' in the drug label." |
+| `case_analysis.py` reasoning trail | "Context check — comorbidity 'X': insufficient evidence — no contraindications/warnings text available for this drug to check against." | "Not enough label data yet to check 'X'." |
+| `evidence_diff.py` | "New research candidate detected (High evidence)." | "New candidate found (High evidence)." |
+| `evidence_diff.py` | "{n} new supporting source{s} since last check." | "{n} new source{s} found since you last checked." |
+
+Every "after" keeps the underlying meaning and the non-negotiable
+disclaimer language intact — only phrasing simplified. Two existing test
+assertions were pinned to the old exact strings
+(`tests/test_case_analysis.py::test_reasoning_trail_is_non_prescriptive_and_populated`,
+`tests/test_evidence_diff.py`'s new-candidate and new-source-count tests) —
+updated to assert on the new copy rather than reverting the wording. Full
+backend suite (156 tests) and `npm run build` both re-verified passing
+after the wording pass.
+
+### Files changed
+
+**Backend:** `app/core/config.py` (+`MAX_DOCUMENTS_PER_DRUG`,
++`SEARCH_RESULT_LIMIT`), `app/core/scoring.py` (+`apply_fair_document_cap`,
+wired into `group_documents_by_pair`), `app/core/search.py` (new),
+`app/schemas/api.py` (+`SearchResultsOut`), `app/main.py` (`/search`
+rewritten: ranking, limit/offset, new response shape),
+`scripts/clear_legacy_bulk_data.py` (new), `scripts/__init__.py` (new, so
+the script is importable from tests), `app/core/case_analysis.py`
+(reasoning-trail wording simplified), `app/core/evidence_diff.py` (summary
+wording simplified). **Frontend:** `src/api.ts` (`searchSignals` now hits
+the real endpoint with limit/offset, + `SearchResults` type),
+`src/pages/ResearchSignals.tsx` (debounced backend search + load-more,
+empty-query browsing unchanged), `src/index.css` (+`.load-more-row`),
+`src/components/Disclaimer.tsx` (wording simplified). **Tests:**
+`tests/test_clear_legacy_data.py` (new, 6 tests), `tests/test_search.py`
+(new, 5 tests), `tests/test_scoring.py` (+2 tests), `tests/test_api.py`
+(search tests updated for new response shape + 4 new tests),
+`tests/test_case_analysis.py` and `tests/test_evidence_diff.py` (2
+assertions updated to match the new wording, not reverted). **Data:**
+`data/arbitrage.db` had 677 legacy rows removed via
+`clear_legacy_bulk_data.py --apply`; `data/arbitrage.db.<timestamp>.bak`
+and `data/legacy_documents_backup_<timestamp>.json` hold the pre-cleanup
+state. **Removed:** stray unrelated `ppt.html` at the repo root.
+
+### Test count
+
+**156 passing, 0 failing** (17 new this round: 6 in
+`tests/test_clear_legacy_data.py`, 5 in `tests/test_search.py`, 2 added to
+`tests/test_scoring.py`, 4 added to `tests/test_api.py` — plus 2 existing
+`/search` tests renamed for the new response shape, not counted as new).
+`npm run build` (frontend) passes.
+
+## TheraLens major redesign — Phase B: frontend (2026-08-20)
+
+Frontend half of the same redesign Phase A's backend foundations were built
+for. Per the user's explicit ordering ("USEFULNESS > DATA VOLUME,
+EXPLANATION > RAW SCORES, EVIDENCE > DECORATION, PATIENT/CASE CONTEXT >
+RANDOM DRUG LISTS, QUALITY > NUMBER OF SIGNALS"), every change below either
+wires the frontend to Phase A's new endpoints or cuts down what a raw
+list/count dump used to show.
+
+### New Case: real, remote, debounced autocomplete (the most-cited complaint)
+
+`hooks/useEntityIndex.ts` — the thing that was dumping raw `/signals`
+data (including `.approved_for`, raw openFDA paragraph text) into the New
+Case form's autocomplete — is deleted. `components/AutocompleteInput.tsx`
+gained an async `fetchOptions` mode (debounced ~250ms, cancels stale
+in-flight requests via a request-id guard, shows "searching…" while
+in-flight and a non-blocking "couldn't reach search — you can still type
+freely" message on failure, since case creation stays free-text by
+design). `pages/NewCase.tsx` now wires primary condition + comorbidities to
+`GET /conditions/search` and medications to `GET /medications/search`.
+Verified live: typing "met" now shows `MetFORMIN (Oral Pill)`, `Metoprolol
+(Oral Pill)`, `Methotrexate (Oral Pill)`, etc. — never a label paragraph.
+
+### Dashboard: cases and source-backed conflicts lead, signal counts demoted
+
+"Safety Conflicts Detected" (a bare per-case count) replaced by a panel
+reading directly off the new `GET /cases/conflicts`: drug × comorbidity ×
+source (e.g. "FDA label"), each row linking to its case, capped at 8 with a
+"view all in case" fallback line. "High-priority Signals" survives as
+"Notable Research Signals" but demoted — smaller panel, top 5 not 6,
+`.dash-panel-secondary` (reduced opacity) — since the user was explicit
+that signal/drug/disease counts shouldn't be the dashboard's headline.
+
+### Drug Explorer → Drug Intelligence
+
+Renamed (nav + heading). Search box now calls `GET /medications/search`
+(via the same async `AutocompleteInput`) instead of filtering the
+already-loaded `/signals`-derived name list — so search itself returns
+clean RxTerms entities, with the underlying list still built from real
+signal data (that part wasn't broken, just badly framed). Detail-panel
+section labels reworded to "Emerging research signals" / "Known indications
+(FDA label)" per the user's requested framing — no new data sources added
+here, since there's no real backing data for a "safety information"
+section beyond what's already shown.
+
+### Research Signals → Research Radar, with filters
+
+Renamed. Added Evidence-tier and Source filters (client-side, composable
+with the existing bounded/ranked backend search from the prior phase —
+left untouched). `OpportunityCard` now shows a one-line "why interesting"
+subtitle (top 2 of the signal's real `reasons`, e.g. "recent (within 1
+year) · 2 independent mentions") always visible, not just inside the
+expanded panel.
+
+### Network graph: rebuilt as click-to-expand instead of rendering everything at once
+
+Old `NetworkGraph.tsx` rendered every drug-disease edge in the dataset
+simultaneously — hundreds of overlapping labels, the exact "unreadable
+graph" the user called out. Rebuilt using the same deterministic
+fixed-position radial layout `CaseGraph.tsx` already proved legible for
+Cases: only the top ~18 drug hubs render by default (no disease nodes at
+all), and clicking a drug hub reveals its disease connections in a small
+arc around it; clicking again collapses it. Verified visually: the
+default view is now a clean set of drug-only nodes with readable,
+non-overlapping labels — a real improvement over the old all-at-once
+render. **Not fully interactively verified**: the browser-automation
+tooling used for this session's checks could not deliver working canvas
+click events to `react-force-graph-2d` in this environment (confirmed via
+a temporary debug listener — even `onBackgroundClick` never fired for any
+on-canvas click), so the click-to-expand behavior is verified by code
+review against `react-force-graph-2d`'s documented `onNodeClick` API
+(matches its TypeScript signature exactly) and by the fact that the
+collapsed/hub-only state renders correctly, but a human should click a
+node in a real browser to confirm expansion before treating this as fully
+proven. Also changed `cooldownTicks` from `0` to `1` so the engine runs one
+tick and builds its interaction hit-test structures (positions stay fixed
+via `fx`/`fy` regardless, so this doesn't affect the layout).
+
+### Light enrichment of CaseDetail/CandidateCard/SafetyFlagsPanel (not rebuilt)
+
+These already matched the user's points 8-12 from earlier phases
+(non-prescriptive framing throughout, "Why did this appear?" / "Why might
+this NOT be appropriate?" panels, three-state conflict display that
+already distinguished "no conflict" from "insufficient evidence" rather
+than conflating them) — so this phase only added:
+- `CandidateCard`: `known_indications` now rendered as chips (truncated to
+  90 chars with a title-attribute full-text tooltip, since openFDA
+  paragraphs can run to hundreds of words — same truncation pattern
+  already used for `reasoning_trail` entries), and the evidence-strength
+  badge now reads from the server's `evidence_tier`/`evidence_tier_reason`
+  (via the existing `backendTierToScoreTier` bridge) instead of
+  re-deriving the tier client-side from a raw score, so the badge and its
+  "why" (e.g. "3 clinical trials, 2 publications") can never disagree.
+- `CandidateCard`'s comorbidity-conflict rows and `SafetyFlagsPanel`: added
+  an explicit "Source: FDA drug label (contraindications/warnings)" line
+  next to each quoted conflict excerpt — this was always true (conflicts
+  only ever come from openFDA label text via `check_comorbidity_conflict`)
+  but wasn't labeled as such in the UI before.
+
+### A real backend bug found and fixed during verification
+
+Testing the redesigned Cases flow surfaced a genuine 500 on `GET /cases`:
+several previously-saved cases' `case_analyses.result_json` blobs were
+stored before Phase A added `evidence_tier`/`evidence_tier_reason` as
+required `CandidateOut` fields, so `AnalysisResult.model_validate_json`
+raised a `pydantic.ValidationError` on any stored candidate list, crashing
+the whole cases list (and would have crashed `GET /cases/{id}`, `GET
+/cases/conflicts`, and the recheck-snapshot diff the same way, once they
+hit a stale record with actual candidates in it). Fixed with a single
+`_load_analysis_result()` helper in `app/main.py` that catches
+`ValidationError` and treats a stale/incompatible stored result the same
+as "never analyzed" — the existing, already-correct UI affordance ("Run
+Analysis" / "Re-analyze") is what surfaces for those cases now, instead of
+a 500. Used at all four `model_validate_json` call sites
+(`_case_summary`, `list_case_conflicts`, `get_case_endpoint`,
+`_run_recheck`'s snapshot load). This is a schema-evolution
+backward-compatibility gap, not a Phase B frontend bug, but it blocked
+verifying the redesigned Cases pages at all, so it was fixed here rather
+than deferred.
+
+### The "would a first-time user understand this in 30 seconds?" self-check
+
+Walked through the actual demo flow (new case → autocomplete → analyze →
+open candidate → check Dashboard/Drug Intelligence/Research Radar) as a
+first-time user, per the user's explicit request:
+
+- **Would I understand what this product does?** Yes — "TheraLens" +
+  "patient-context repurposing intelligence" in the sidebar, the
+  case-first Dashboard, and the always-visible disclaimer banner on case
+  pages set the frame immediately.
+- **Would I know why I should create a case?** Yes — it's the first CTA in
+  the sidebar and the Dashboard's lead panel; New Case's subtitle states
+  the value prop directly ("surface repurposing research signals... not a
+  diagnosis or treatment recommendation").
+- **Would I trust where a result came from?** Yes for the parts that were
+  in scope here — every candidate's evidence links to a real
+  ClinicalTrials.gov/Europe PMC/openFDA source, comorbidity conflicts now
+  say explicitly which document type backed them, and the medication/
+  condition autocomplete no longer shows anything that isn't a real
+  terminology-service entity.
+- **Does it help me investigate, or just show me data?** Mostly yes, with
+  one honest gap: the network graph's click-to-expand couldn't be
+  confirmed working end-to-end in this session (see above) — if it turns
+  out not to work in a real browser, that page still degrades to "a clean
+  set of drug hubs with no way to drill in," not back to the old unreadable
+  full dump, but it wouldn't fully deliver the "investigate" framing for
+  that one view until confirmed.
+
+### Files changed/added
+
+**Frontend:** `src/api.ts` (+`TerminologyEntry`/`TerminologySearchResult`
+types, +`CaseConflictOut`, +`searchMedications`/`searchConditions`/
+`getConflicts`, `CandidateOut` +`evidence_tier`/`evidence_tier_reason`,
+`CaseCreateInput` +`allow_duplicate`), `src/components/AutocompleteInput.tsx`
+(rewritten: async `fetchOptions` mode alongside static `options` mode),
+`src/pages/NewCase.tsx` (rewired to remote autocomplete, `useEntityIndex`
+dependency dropped), `src/pages/Dashboard.tsx` (conflicts panel rewritten,
+signals panel demoted), `src/pages/DrugExplorer.tsx` (renamed "Drug
+Intelligence," search rewired to `/medications/search`), `src/pages/
+ResearchSignals.tsx` (renamed "Research Radar," +evidence-tier/source
+filters), `src/components/NetworkGraph.tsx` (rewritten: click-to-expand
+hub layout instead of render-everything), `src/components/OpportunityCard.tsx`
+(+one-line "why interesting" subtitle), `src/components/CandidateCard.tsx`
+(+known-indications chips, server-sourced evidence tier + reason,
+comorbidity-conflict source labeling), `src/components/SafetyFlagsPanel.tsx`
+(+source labeling), `src/components/Sidebar.tsx` (nav labels updated),
+`src/index.css` (new styles for all of the above). **Deleted:**
+`src/hooks/useEntityIndex.ts` (no remaining callers). **Backend:**
+`app/main.py` (+`_load_analysis_result()` backward-compatibility fix for
+the stale-schema 500, used at 4 call sites).
+
+### Test count
+
+Backend: **187 passing, 0 failing** (unchanged count from Phase A — the
+`main.py` fix added no new branches worth a dedicated test beyond the
+existing case-analysis/case-api coverage, since it's a defensive fallback
+around already-tested `AnalysisResult` parsing; re-run and confirmed after
+the fix). `npm run build` (frontend) passes.
+
+### Explicitly not done here
+
+Data-quality gaps Phase A already flagged as deliberately not deleted
+(RxNorm-miss-ambiguous names like `bms-986511`/`bms 986511` duplicate
+entries, short abbreviations like `"ad"`/`"ai"`) still surface in Drug
+Intelligence's browse list — out of scope for a frontend phase, flagged
+here as a visible symptom of that already-documented backend limitation.

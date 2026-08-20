@@ -14,7 +14,7 @@ from collections import defaultdict
 from datetime import date
 from typing import Iterable
 
-from app.core.config import MIN_CONFIDENCE_SCORE
+from app.core.config import MAX_DOCUMENTS_PER_DRUG, MIN_CONFIDENCE_SCORE
 from app.core.disease_matching import diseases_match, is_junk_condition
 from app.schemas.document import ApprovedIndication, Document, Signal
 
@@ -113,14 +113,38 @@ def build_approved_index(
     return index
 
 
+def apply_fair_document_cap(
+    documents: Iterable[Document], max_per_drug: int = MAX_DOCUMENTS_PER_DRUG
+) -> list[Document]:
+    """Caps how many documents any single drug contributes, so a drug with a
+    disproportionate raw document count (e.g. from real-world trial volume,
+    or a data-quality issue) can't dwarf every other drug's signal counts —
+    see MAX_DOCUMENTS_PER_DRUG's docstring in app/core/config.py for why.
+    Keeps the most recent `max_per_drug` documents per drug (freshest
+    evidence is what a live discovery feed should prioritize showing);
+    documents with no date sort last and are dropped first when trimming."""
+    by_drug: dict[str, list[Document]] = defaultdict(list)
+    for doc in documents:
+        by_drug[doc.normalized_drug()].append(doc)
+
+    capped: list[Document] = []
+    for docs in by_drug.values():
+        docs.sort(key=lambda d: d.date or date.min, reverse=True)
+        capped.extend(docs[:max_per_drug])
+    return capped
+
+
 def group_documents_by_pair(
     documents: Iterable[Document],
 ) -> dict[tuple[str, str], list[Document]]:
     """Drops documents whose disease is junk (generic trial-eligibility
     terms, study-description sentences — see is_junk_condition) before
-    grouping, so junk never reaches scoring/signal output."""
+    grouping, so junk never reaches scoring/signal output. Also applies the
+    fair per-drug document cap (see apply_fair_document_cap) first, so no
+    single drug's pair groups can be built from more than its fair share of
+    documents."""
     groups: dict[tuple[str, str], list[Document]] = defaultdict(list)
-    for doc in documents:
+    for doc in apply_fair_document_cap(documents):
         if is_junk_condition(doc.disease):
             continue
         key = (doc.normalized_drug(), doc.normalized_disease())

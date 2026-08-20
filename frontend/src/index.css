@@ -355,6 +355,12 @@ a {
   gap: 14px;
 }
 
+.load-more-row {
+  display: flex;
+  justify-content: center;
+  padding: 20px 0;
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -396,6 +402,12 @@ a {
 
 .card-pair .disease {
   color: var(--text-dim);
+  text-transform: capitalize;
+}
+
+.card-why {
+  font-size: 11.5px;
+  color: var(--text-faint);
   text-transform: capitalize;
 }
 
@@ -1113,6 +1125,13 @@ a {
   color: var(--text);
 }
 
+.autocomplete-status {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-faint, var(--text-dim));
+  font-style: italic;
+}
+
 /* ---------- disclaimer ---------- */
 
 .disclaimer-banner {
@@ -1189,6 +1208,10 @@ a {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.dash-panel-secondary {
+  opacity: 0.85;
 }
 
 .dash-panel-head {
@@ -1431,6 +1454,11 @@ a {
   align-items: flex-start;
 }
 
+.metric-reason {
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
 .metric-label {
   font-size: 9.5px;
   text-transform: uppercase;
@@ -1440,6 +1468,10 @@ a {
 
 .candidate-known-for {
   margin-top: 10px;
+}
+
+.candidate-known-note {
+  margin-top: 6px;
   font-size: 11.5px;
   color: var(--text-faint);
   font-style: italic;
@@ -1595,6 +1627,12 @@ a {
   font-style: italic;
 }
 
+.comorbidity-check-source {
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
 .interaction-note {
   display: flex;
   gap: 8px;
@@ -1642,6 +1680,12 @@ a {
   color: var(--text-dim);
   font-style: italic;
   font-size: 11.5px;
+}
+
+.safety-flag-source {
+  color: var(--text-faint);
+  font-size: 10.5px;
+  margin-top: 2px;
 }
 
 .safety-flag-note {
@@ -1725,6 +1769,23 @@ a {
   gap: 16px;
   flex-wrap: wrap;
   margin-bottom: 16px;
+}
+
+.radar-filters {
+  margin-top: 12px;
+}
+
+.filter-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.filter-field select {
+  width: auto;
+  padding: 6px 8px;
 }
 
 .explorer-layout {

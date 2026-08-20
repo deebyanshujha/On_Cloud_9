@@ -14,6 +14,7 @@ from app.core.case_analysis import (
     INSUFFICIENT_PENALTY_PER_HIT,
     analyze_case,
 )
+from app.core.config import MAX_CANDIDATES_PER_CASE
 from app.schemas.document import ApprovedIndication, Document
 
 TODAY = date(2026, 8, 19)
@@ -196,6 +197,45 @@ def test_research_priority_score_never_goes_negative():
     assert candidates[0].research_priority_score >= 0.0
 
 
+def test_candidate_evidence_tier_and_reason_are_populated():
+    documents, approved = make_signal_inputs()
+    candidates = analyze_case(
+        primary_condition="pancreatic cancer",
+        comorbidities=[],
+        documents=documents,
+        approved=approved,
+        today=TODAY,
+    )
+    candidate = candidates[0]
+    assert candidate.evidence_tier in {"high", "moderate", "low", "insufficient"}
+    assert "clinical trial" in candidate.evidence_tier_reason
+
+
+def test_candidates_are_capped_to_configured_max_highest_score_first():
+    documents = [
+        Document(
+            drug=f"drug-{i}",
+            disease="stage iv pancreatic cancer",
+            source="clinicaltrials",
+            source_id=f"NCT-TEST-{i:04d}",
+            phase="phase 3" if i % 2 == 0 else "phase 1",
+            date=date(2026, 1, 1),
+            num_mentions=i + 1,
+        )
+        for i in range(MAX_CANDIDATES_PER_CASE + 5)
+    ]
+    candidates = analyze_case(
+        primary_condition="pancreatic cancer",
+        comorbidities=[],
+        documents=documents,
+        approved=[],
+        today=TODAY,
+    )
+    assert len(candidates) == MAX_CANDIDATES_PER_CASE
+    scores = [c.research_priority_score for c in candidates]
+    assert scores == sorted(scores, reverse=True)
+
+
 def test_reasoning_trail_is_non_prescriptive_and_populated():
     documents, approved = make_signal_inputs()
     candidates = analyze_case(
@@ -210,4 +250,4 @@ def test_reasoning_trail_is_non_prescriptive_and_populated():
     joined = " ".join(trail).lower()
     assert "take metformin" not in joined
     assert "best treatment" not in joined
-    assert "clinical review required" in joined
+    assert "a clinician should review it" in joined

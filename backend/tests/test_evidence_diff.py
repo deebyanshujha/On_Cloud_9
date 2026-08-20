@@ -4,6 +4,7 @@ and brand-new candidates between a case's saved snapshot and a fresh
 re-analysis. Uses synthetic CandidateOut objects (no network/DB) so the
 suite is fast and deterministic.
 """
+from app.core.case_analysis import evidence_tier
 from app.core.evidence_diff import diff_candidates
 from app.schemas.case import (
     CandidateOut,
@@ -24,6 +25,8 @@ def make_candidate(
         research_priority_score=score,
         evidence_strength_score=score,
         known_indications=[],
+        evidence_tier=evidence_tier(score),
+        evidence_tier_reason=f"{len(source_ids)} clinical trial{'s' if len(source_ids) != 1 else ''}",
         primary_condition_evidence=[
             SupportingEvidence(source="clinicaltrials", source_id=sid, url=None, date=None, phase=None)
             for sid in source_ids
@@ -59,7 +62,7 @@ def test_new_supporting_source_is_detected_even_without_tier_change():
     changes = diff_candidates(snapshot, current)
     assert len(changes) == 1
     assert changes[0].new_supporting_source_ids == ["NCT002"]
-    assert "1 new supporting source" in changes[0].summary
+    assert "1 new source found" in changes[0].summary
 
 
 def test_new_context_conflict_is_detected():
@@ -98,7 +101,7 @@ def test_brand_new_candidate_is_detected():
     assert change.is_new_candidate is True
     assert change.evidence_tier_before is None
     assert change.evidence_score_before is None
-    assert "New research candidate detected" in change.summary
+    assert "New candidate found" in change.summary
 
 
 def test_multiple_signals_for_same_drug_are_aggregated_by_max_score_and_union_sources():

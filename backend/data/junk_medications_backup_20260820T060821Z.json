@@ -1,0 +1,175 @@
+{
+  "documents": [
+    {
+      "id": 686,
+      "drug": "placebo",
+      "disease": "major depressive disorder",
+      "source": "clinicaltrials",
+      "source_id": "NCT07772531",
+      "phase": "phase 2",
+      "date": "2026-08-19",
+      "url": "https://clinicaltrials.gov/study/NCT07772531",
+      "num_mentions": 1,
+      "fetched_at": "2026-08-19T16:08:13"
+    },
+    {
+      "id": 699,
+      "drug": "rapid esc-guideline based secondary prevention following myocardial infaction",
+      "disease": "acute coronary syndrome (acs) undergoing percutaneous coronary intervention (pci)",
+      "source": "clinicaltrials",
+      "source_id": "NCT07773272",
+      "phase": null,
+      "date": "2026-08-19",
+      "url": "https://clinicaltrials.gov/study/NCT07773272",
+      "num_mentions": 1,
+      "fetched_at": "2026-08-19T16:18:39"
+    },
+    {
+      "id": 700,
+      "drug": "rapid esc-guideline based secondary prevention following myocardial infaction",
+      "disease": "hypercholerolemia",
+      "source": "clinicaltrials",
+      "source_id": "NCT07773272",
+      "phase": null,
+      "date": "2026-08-19",
+      "url": "https://clinicaltrials.gov/study/NCT07773272",
+      "num_mentions": 1,
+      "fetched_at": "2026-08-19T16:18:39"
+    },
+    {
+      "id": 701,
+      "drug": "rapid esc-guideline based secondary prevention following myocardial infaction",
+      "disease": "hypertension",
+      "source": "clinicaltrials",
+      "source_id": "NCT07773272",
+      "phase": null,
+      "date": "2026-08-19",
+      "url": "https://clinicaltrials.gov/study/NCT07773272",
+      "num_mentions": 1,
+      "fetched_at": "2026-08-19T16:18:39"
+    },
+    {
+      "id": 702,
+      "drug": "rapid esc-guideline based secondary prevention following myocardial infaction",
+      "disease": "diabete mellitus",
+      "source": "clinicaltrials",
+      "source_id": "NCT07773272",
+      "phase": null,
+      "date": "2026-08-19",
+      "url": "https://clinicaltrials.gov/study/NCT07773272",
+      "num_mentions": 1,
+      "fetched_at": "2026-08-19T16:18:39"
+    },
+    {
+      "id": 703,
+      "drug": "rapid esc-guideline based secondary prevention following myocardial infaction",
+      "disease": "cardiovascular risk management",
+      "source": "clinicaltrials",
+      "source_id": "NCT07773272",
+      "phase": null,
+      "date": "2026-08-19",
+      "url": "https://clinicaltrials.gov/study/NCT07773272",
+      "num_mentions": 1,
+      "fetched_at": "2026-08-19T16:18:39"
+    },
+    {
+      "id": 708,
+      "drug": "placebo",
+      "disease": "ulcerative colitis (uc)",
+      "source": "clinicaltrials",
+      "source_id": "NCT07773948",
+      "phase": "phase 4",
+      "date": "2026-08-19",
+      "url": "https://clinicaltrials.gov/study/NCT07773948",
+      "num_mentions": 1,
+      "fetched_at": "2026-08-19T16:18:39"
+    },
+    {
+      "id": 709,
+      "drug": "placebo",
+      "disease": "pouchitis",
+      "source": "clinicaltrials",
+      "source_id": "NCT07773948",
+      "phase": "phase 4",
+      "date": "2026-08-19",
+      "url": "https://clinicaltrials.gov/study/NCT07773948",
+      "num_mentions": 1,
+      "fetched_at": "2026-08-19T16:18:39"
+    },
+    {
+      "id": 875,
+      "drug": "rapid esc guideline based secondary prevention following myocardial infaction",
+      "disease": "acute coronary syndrome (acs) undergoing percutaneous coronary intervention (pci)",
+      "source": "clinicaltrials",
+      "source_id": "NCT07773272",
+      "phase": null,
+      "date": "2026-08-19",
+      "url": "https://clinicaltrials.gov/study/NCT07773272",
+      "num_mentions": 1,
+      "fetched_at": "2026-08-19T17:45:16"
+    },
+    {
+      "id": 876,
+      "drug": "rapid esc guideline based secondary prevention following myocardial infaction",
+      "disease": "hypercholerolemia",
+      "source": "clinicaltrials",
+      "source_id": "NCT07773272",
+      "phase": null,
+      "date": "2026-08-19",
+      "url": "https://clinicaltrials.gov/study/NCT07773272",
+      "num_mentions": 1,
+      "fetched_at": "2026-08-19T17:45:16"
+    },
+    {
+      "id": 877,
+      "drug": "rapid esc guideline based secondary prevention following myocardial infaction",
+      "disease": "hypertension",
+      "source": "clinicaltrials",
+      "source_id": "NCT07773272",
+      "phase": null,
+      "date": "2026-08-19",
+      "url": "https://clinicaltrials.gov/study/NCT07773272",
+      "num_mentions": 1,
+      "fetched_at": "2026-08-19T17:45:16"
+    },
+    {
+      "id": 878,
+      "drug": "rapid esc guideline based secondary prevention following myocardial infaction",
+      "disease": "diabete mellitus",
+      "source": "clinicaltrials",
+      "source_id": "NCT07773272",
+      "phase": null,
+      "date": "2026-08-19",
+      "url": "https://clinicaltrials.gov/study/NCT07773272",
+      "num_mentions": 1,
+      "fetched_at": "2026-08-19T17:45:16"
+    },
+    {
+      "id": 879,
+      "drug": "rapid esc guideline based secondary prevention following myocardial infaction",
+      "disease": "cardiovascular risk management",
+      "source": "clinicaltrials",
+      "source_id": "NCT07773272",
+      "phase": null,
+      "date": "2026-08-19",
+      "url": "https://clinicaltrials.gov/study/NCT07773272",
+      "num_mentions": 1,
+      "fetched_at": "2026-08-19T17:45:16"
+    }
+  ],
+  "known_drugs": [
+    {
+      "id": 7,
+      "canonical_name": "placebo",
+      "name_variants": "[\"Placebo\", \"placebo\"]",
+      "rxnorm_id": "8375"
+    },
+    {
+      "id": 16,
+      "canonical_name": "rapid esc guideline based secondary prevention following myocardial infaction",
+      "name_variants": "[\"Rapid ESC-guideline based secondary prevention following myocardial infaction\", \"rapid esc guideline based secondary prevention following myocardial infaction\"]",
+      "rxnorm_id": null
+    }
+  ],
+  "case_medications": []
+}

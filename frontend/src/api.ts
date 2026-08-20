@@ -18,6 +18,27 @@ export interface Signal {
   sources: SourceLink[];
 }
 
+export interface SearchResults {
+  results: Signal[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// --- Clean terminology autocomplete (Phase B) -------------------------------
+// Structured entity search backed by NLM's free, no-login Clinical Table
+// Search Service (RxTerms for medications, "conditions" for diseases) —
+// never raw openFDA label text or trial titles. See app/core/terminology.py.
+
+export interface TerminologyEntry {
+  name: string;
+}
+
+export interface TerminologySearchResult {
+  results: TerminologyEntry[];
+  source_unavailable: boolean;
+}
+
 // --- TheraLens Cases (Phase 2) ----------------------------------------------
 
 export interface CaseOut {
@@ -56,11 +77,24 @@ export interface CandidateOut {
   research_priority_score: number;
   evidence_strength_score: number;
   known_indications: string[];
+  evidence_tier: string;
+  evidence_tier_reason: string;
   primary_condition_evidence: SourceLink[];
   comorbidity_checks: ComorbidityCheck[];
   current_medication_interactions: CurrentMedicationInteractionNote;
   reasoning_trail: string[];
   research_framing: string;
+}
+
+// --- Cross-case conflicts (Phase B dashboard) -------------------------------
+
+export interface CaseConflictOut {
+  case_id: number;
+  primary_condition: string;
+  drug: string;
+  comorbidity: string;
+  evidence_excerpt: string | null;
+  source: string;
 }
 
 export interface AnalysisResult {
@@ -112,6 +146,7 @@ export interface CaseCreateInput {
   primary_condition: string;
   comorbidities: string[];
   current_medications: string[];
+  allow_duplicate?: boolean;
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
@@ -140,8 +175,9 @@ export function fetchSignals(): Promise<Signal[]> {
   return getJson<Signal[]>("/signals");
 }
 
-export function searchSignals(query: string): Promise<Signal[]> {
-  return getJson<Signal[]>(`/search?q=${encodeURIComponent(query)}`);
+export function searchSignals(query: string, limit = 20, offset = 0): Promise<SearchResults> {
+  const params = new URLSearchParams({ q: query, limit: String(limit), offset: String(offset) });
+  return getJson<SearchResults>(`/search?${params.toString()}`);
 }
 
 export function fetchSignalsForDrug(drug: string): Promise<Signal[]> {
@@ -174,4 +210,18 @@ export function recheckCase(id: number): Promise<EvidenceCheckResult> {
 
 export function recheckAllCases(): Promise<RecheckAllResult> {
   return sendJson<RecheckAllResult>("/cases/recheck-all", "POST");
+}
+
+export function getConflicts(): Promise<CaseConflictOut[]> {
+  return getJson<CaseConflictOut[]>("/cases/conflicts");
+}
+
+export function searchMedications(query: string): Promise<TerminologySearchResult> {
+  const params = new URLSearchParams({ q: query });
+  return getJson<TerminologySearchResult>(`/medications/search?${params.toString()}`);
+}
+
+export function searchConditions(query: string): Promise<TerminologySearchResult> {
+  const params = new URLSearchParams({ q: query });
+  return getJson<TerminologySearchResult>(`/conditions/search?${params.toString()}`);
 }

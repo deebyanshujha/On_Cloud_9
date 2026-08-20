@@ -1,12 +1,12 @@
 import { useState } from "react";
 import type { CandidateOut } from "../api";
 import {
+  backendTierToScoreTier,
   CONFLICT_STATUS_CLASS,
   CONFLICT_STATUS_ICON,
   CONFLICT_STATUS_LABEL,
   SCORE_TIER_LABEL,
   SOURCE_LABELS,
-  scoreTier,
   worstConflictState,
 } from "../scoring";
 
@@ -16,7 +16,7 @@ interface Props {
 
 export default function CandidateCard({ candidate }: Props) {
   const [open, setOpen] = useState(false);
-  const tier = scoreTier(candidate.evidence_strength_score);
+  const tier = backendTierToScoreTier(candidate.evidence_tier);
   const worst = worstConflictState(candidate.comorbidity_checks.map((c) => c.status));
 
   return (
@@ -31,6 +31,7 @@ export default function CandidateCard({ candidate }: Props) {
           <div className="metric-block">
             <span className="metric-label">Evidence strength</span>
             <span className={`badge ${tier}`}>{SCORE_TIER_LABEL[tier]}</span>
+            <span className="metric-reason">{candidate.evidence_tier_reason}</span>
           </div>
           <div className="metric-block">
             <span className="metric-label">Research priority</span>
@@ -49,7 +50,15 @@ export default function CandidateCard({ candidate }: Props) {
 
       {candidate.known_indications.length > 0 && (
         <div className="candidate-known-for">
-          Already approved for other uses — this is a new, unapproved association being studied.
+          <div className="detail-section-label">Known indications</div>
+          <div className="chip-row">
+            {candidate.known_indications.map((ind, i) => (
+              <span className="reason-chip" key={i} title={ind.length > KNOWN_INDICATION_MAX_CHARS ? ind : undefined}>
+                {truncate(ind, KNOWN_INDICATION_MAX_CHARS)}
+              </span>
+            ))}
+          </div>
+          <div className="candidate-known-note">This is a new, unapproved association being studied.</div>
         </div>
       )}
 
@@ -73,6 +82,7 @@ export default function CandidateCard({ candidate }: Props) {
 // produce a single trail entry hundreds of words long. Truncated here for
 // on-screen legibility only; nothing about the underlying data changes.
 const TRAIL_ENTRY_MAX_CHARS = 320;
+const KNOWN_INDICATION_MAX_CHARS = 90;
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -142,7 +152,12 @@ function WhyNotAppropriate({ candidate }: { candidate: CandidateOut }) {
                 <span className="comorbidity-check-name">{check.comorbidity}</span>
                 <span className="comorbidity-check-status">{CONFLICT_STATUS_LABEL[check.status]}</span>
               </div>
-              {check.evidence && <div className="comorbidity-check-evidence">&ldquo;{check.evidence}&rdquo;</div>}
+              {check.evidence && (
+                <>
+                  <div className="comorbidity-check-evidence">&ldquo;{check.evidence}&rdquo;</div>
+                  <div className="comorbidity-check-source">Source: FDA drug label (contraindications/warnings)</div>
+                </>
+              )}
             </li>
           ))}
         </ul>

@@ -28,6 +28,10 @@ export default function OpportunityCard({ signal }: Props) {
           <span className="disease">{signal.disease}</span>
         </div>
 
+        {signal.reasons.length > 0 && (
+          <div className="card-why">{signal.reasons.slice(0, 2).join(" · ")}</div>
+        )}
+
         <div className="card-metrics">
           <div className="score-block">
             <span className={`score-value mono ${tier}`}>

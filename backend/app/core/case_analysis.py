@@ -23,10 +23,11 @@ case-context (comorbidity conflicts) on top of each one's existing score.
 """
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date as date_, datetime
 from typing import Iterable
 
+from app.core.config import MAX_CANDIDATES_PER_CASE
 from app.core.context_check import check_comorbidity_conflict, combine_states
 from app.core.disease_matching import diseases_match
 from app.core.scoring import normalize, run_comparison
@@ -108,14 +109,14 @@ def _reasoning_trail(
     trail: list[str] = []
     if signal.approved_for:
         trail.append(
-            "Known indication(s) on record: " + "; ".join(signal.approved_for)
+            "Currently approved for: " + "; ".join(signal.approved_for)
         )
     else:
-        trail.append("No approved indications on record for this drug (insufficient evidence).")
+        trail.append("We don't have approval records for this drug yet.")
 
     trail.append(
-        f"New disease association surfaced: '{signal.drug}' studied against "
-        f"'{signal.disease}', not among its recorded approved indications."
+        f"'{signal.drug}' is being studied for '{signal.disease}', which it "
+        "isn't currently approved to treat."
     )
 
     trail.append(
@@ -126,27 +127,25 @@ def _reasoning_trail(
     )
 
     trail.append(
-        f"Evidence strength score (existing scoring engine): {evidence_strength_score(signal)}"
+        f"Evidence strength: {evidence_strength_score(signal)} "
+        f"({evidence_tier(evidence_strength_score(signal)).title()})"
     )
 
     if comorbidity_checks:
         for check in comorbidity_checks:
             if check.status == "conflict_detected":
                 trail.append(
-                    f"Context check — comorbidity '{check.comorbidity}': conflict "
-                    f"detected in label text — \"{check.evidence}\" — clinical "
-                    "review required."
+                    f"Possible conflict with '{check.comorbidity}' — the drug "
+                    f"label warns about this — \"{check.evidence}\" — a "
+                    "clinician should review it."
                 )
             elif check.status == "no_conflict_detected":
                 trail.append(
-                    f"Context check — comorbidity '{check.comorbidity}': no conflict "
-                    "detected in available contraindications/warnings text."
+                    f"No warning found for '{check.comorbidity}' in the drug label."
                 )
             else:
                 trail.append(
-                    f"Context check — comorbidity '{check.comorbidity}': insufficient "
-                    "evidence — no contraindications/warnings text available for this "
-                    "drug to check against."
+                    f"Not enough label data yet to check '{check.comorbidity}'."
                 )
     else:
         trail.append("No comorbidities recorded for this case — no context checks run.")
@@ -171,6 +170,25 @@ def evidence_tier(score: float) -> str:
     if score >= 0.4:
         return "moderate"
     return "low"
+
+
+_SOURCE_LABEL = {
+    "clinicaltrials": "clinical trial",
+    "biorxiv": "publication",
+    "medrxiv": "publication",
+}
+
+
+def _evidence_tier_reason(signal: Signal) -> str:
+    """Short, human-readable basis for the tier — built from real counts
+    already on the signal's supporting documents, never fabricated."""
+    counts = Counter(
+        _SOURCE_LABEL.get(d.source, d.source) for d in signal.supporting_documents
+    )
+    if not counts:
+        return "No supporting evidence found."
+    parts = [f"{n} {label}{'s' if n != 1 else ''}" for label, n in counts.items()]
+    return ", ".join(parts)
 
 
 def _supporting_evidence(signal: Signal) -> list[SupportingEvidence]:
@@ -223,6 +241,8 @@ def analyze_case(
                 research_priority_score=score,
                 evidence_strength_score=evidence_strength_score(signal),
                 known_indications=signal.approved_for,
+                evidence_tier=evidence_tier(evidence_strength_score(signal)),
+                evidence_tier_reason=_evidence_tier_reason(signal),
                 primary_condition_evidence=_supporting_evidence(signal),
                 comorbidity_checks=comorbidity_checks,
                 current_medication_interactions=CurrentMedicationInteractionNote(),
@@ -231,4 +251,7 @@ def analyze_case(
         )
 
     candidates.sort(key=lambda c: c.research_priority_score, reverse=True)
-    return candidates
+    # Cap to the top-N most relevant candidates (see config.MAX_CANDIDATES_PER_CASE)
+    # — a case page answers "what's worth investigating," not an exhaustive
+    # signal dump.
+    return candidates[:MAX_CANDIDATES_PER_CASE]

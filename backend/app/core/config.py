@@ -41,3 +41,27 @@ OPENFDA_LABELS_PER_DRUG = _int_env("ARB_OPENFDA_LABELS_PER_DRUG", 10)
 
 # Page size per request for paginated sources.
 PAGE_SIZE = _int_env("ARB_PAGE_SIZE", 50)
+
+# Fair-budget cap (2026-08-20 data-imbalance fix): the most documents any
+# single drug is allowed to contribute to scoring, regardless of how many it
+# actually has in the DB. Guards against one drug's real-world trial volume
+# structurally dwarfing every other drug's signals the way the old
+# pre-discovery metformin/sildenafil bulk ingestion did (see
+# scripts/clear_legacy_bulk_data.py and PROGRESS.md for the audit that found
+# it) — this is the forward-looking half of that fix, the cleanup script is
+# the backward-looking half. Default chosen from the real post-cleanup
+# distribution: the most-documented dynamically-discovered drug currently
+# has 18 documents, so 50 gives real headroom (~3x) before the cap ever
+# engages under normal operation, while still bounding runaway skew.
+MAX_DOCUMENTS_PER_DRUG = _int_env("ARB_MAX_DOCUMENTS_PER_DRUG", 50)
+
+# Default number of results /search returns per page.
+SEARCH_RESULT_LIMIT = _int_env("ARB_SEARCH_RESULT_LIMIT", 20)
+
+# Max research candidates a single case analysis returns (highest
+# research_priority_score first). Unbounded candidate lists were the
+# "203 signals dumped on screen" problem one level up (see PROGRESS.md) —
+# this is the case-analysis-specific version of the same fix: a case page
+# should answer "what's worth investigating," not enumerate every matching
+# signal.
+MAX_CANDIDATES_PER_CASE = _int_env("ARB_MAX_CANDIDATES_PER_CASE", 10)

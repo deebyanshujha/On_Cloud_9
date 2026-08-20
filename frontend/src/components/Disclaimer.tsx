@@ -8,7 +8,7 @@ interface Props {
 // globally.
 export default function Disclaimer({ prominent }: Props) {
   const text =
-    "This platform provides research intelligence and is not a medical diagnosis, prescription, or treatment recommendation.";
+    "This is a research tool, not medical advice — it doesn't diagnose, prescribe, or recommend treatment.";
 
   if (prominent) {
     return (

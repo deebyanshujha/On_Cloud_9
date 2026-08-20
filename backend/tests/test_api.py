@@ -81,26 +81,69 @@ def test_search_matches_drug():
     client = make_client()
     response = client.get("/search", params={"q": "metformin"})
     assert response.status_code == 200
-    assert all(s["drug"] == "metformin" for s in response.json())
+    body = response.json()
+    assert all(s["drug"] == "metformin" for s in body["results"])
 
 
 def test_search_matches_disease():
     client = make_client()
     response = client.get("/search", params={"q": "myeloma"})
     assert response.status_code == 200
-    diseases = {s["disease"] for s in response.json()}
+    diseases = {s["disease"] for s in response.json()["results"]}
     assert "multiple myeloma" in diseases
 
 
-def test_search_empty_query_returns_empty_list():
+def test_search_empty_query_returns_empty_result():
     client = make_client()
     response = client.get("/search", params={"q": "   "})
     assert response.status_code == 200
-    assert response.json() == []
+    body = response.json()
+    assert body["results"] == []
+    assert body["total"] == 0
 
 
-def test_search_no_matches_returns_empty_list():
+def test_search_no_matches_returns_empty_result():
     client = make_client()
     response = client.get("/search", params={"q": "zzz-nonexistent"})
     assert response.status_code == 200
-    assert response.json() == []
+    body = response.json()
+    assert body["results"] == []
+    assert body["total"] == 0
+
+
+def test_search_response_reports_total_limit_offset():
+    client = make_client()
+    response = client.get("/search", params={"q": "metformin", "limit": 1})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["limit"] == 1
+    assert body["offset"] == 0
+    assert len(body["results"]) == 1
+    assert body["total"] >= 1
+
+
+def test_search_pagination_offset_moves_through_results():
+    client = make_client()
+    first_page = client.get("/search", params={"q": "metformin", "limit": 1, "offset": 0}).json()
+    second_page = client.get("/search", params={"q": "metformin", "limit": 1, "offset": 1}).json()
+    if first_page["total"] > 1:
+        assert first_page["results"] != second_page["results"]
+
+
+def test_search_default_limit_is_bounded():
+    client = make_client()
+    response = client.get("/search", params={"q": "a"})
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["results"]) <= body["limit"]
+
+
+def test_search_exact_drug_match_ranks_above_substring_match():
+    client = make_client()
+    response = client.get("/search", params={"q": "metformin"})
+    body = response.json()
+    results = body["results"]
+    assert len(results) >= 1
+    # every metformin result should rank ahead of any purely-substring
+    # disease match, since "metformin" only appears here as a drug field.
+    assert all(r["drug"] == "metformin" for r in results)

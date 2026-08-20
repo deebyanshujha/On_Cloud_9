@@ -1,11 +1,19 @@
-import { useState } from "react";
-import { analyzeCase, createCase } from "../api";
+import { useCallback, useState } from "react";
+import { analyzeCase, createCase, searchConditions, searchMedications } from "../api";
 import AutocompleteInput from "../components/AutocompleteInput";
-import { useEntityIndex } from "../hooks/useEntityIndex";
 import { navigate } from "../router";
 
+async function conditionOptions(query: string): Promise<string[]> {
+  const res = await searchConditions(query);
+  return res.results.map((r) => r.name);
+}
+
+async function medicationOptions(query: string): Promise<string[]> {
+  const res = await searchMedications(query);
+  return res.results.map((r) => r.name);
+}
+
 export default function NewCase() {
-  const { drugs, diseases } = useEntityIndex();
   const [primaryCondition, setPrimaryCondition] = useState("");
   const [comorbidities, setComorbidities] = useState<string[]>([""]);
   const [medications, setMedications] = useState<string[]>([""]);
@@ -17,6 +25,9 @@ export default function NewCase() {
     next[i] = value;
     return next;
   };
+
+  const fetchConditions = useCallback(conditionOptions, []);
+  const fetchMedications = useCallback(medicationOptions, []);
 
   async function handleSubmit() {
     if (!primaryCondition.trim() || submitting) return;
@@ -52,7 +63,7 @@ export default function NewCase() {
           <AutocompleteInput
             value={primaryCondition}
             onChange={setPrimaryCondition}
-            options={diseases}
+            fetchOptions={fetchConditions}
             placeholder="e.g. pancreatic cancer"
             autoFocus
           />
@@ -65,7 +76,7 @@ export default function NewCase() {
               <AutocompleteInput
                 value={value}
                 onChange={(v) => setComorbidities(updateAt(comorbidities, i, v))}
-                options={diseases}
+                fetchOptions={fetchConditions}
                 placeholder="e.g. renal impairment"
               />
               {comorbidities.length > 1 && (
@@ -92,7 +103,7 @@ export default function NewCase() {
               <AutocompleteInput
                 value={value}
                 onChange={(v) => setMedications(updateAt(medications, i, v))}
-                options={drugs}
+                fetchOptions={fetchMedications}
                 placeholder="e.g. metformin"
               />
               {medications.length > 1 && (

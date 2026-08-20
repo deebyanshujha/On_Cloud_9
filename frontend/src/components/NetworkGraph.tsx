@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import type { Signal } from "../api";
 import { scoreTier } from "../scoring";
@@ -7,15 +7,15 @@ interface Props {
   signals: Signal[];
 }
 
-// react-force-graph-2d's generics don't infer cleanly through a
-// self-referencing node/link shape, so graphData is passed as `any` below —
-// these interfaces still give us type safety everywhere else in this file.
 interface GraphNode {
   id: string;
   label: string;
   kind: "drug" | "disease";
+  expanded?: boolean;
   x?: number;
   y?: number;
+  fx?: number;
+  fy?: number;
 }
 
 interface GraphLink {
@@ -32,53 +32,109 @@ const TIER_COLOR: Record<string, string> = {
 };
 
 const DRUG_COLOR = "#e7ebf3";
-const DISEASE_COLOR = "#7c8ba3";
+const DRUG_COLLAPSED_COLOR = "#7c8ba3";
+const DISEASE_COLOR = "#a9b3c8";
 
+const MAX_HUBS = 18;
+const HUB_RADIUS = 220;
+const DISEASE_RADIUS_STEP = 90;
+
+// Rendering every drug-disease edge in the dataset at once (the previous
+// version) produces hundreds of overlapping labels — unreadable regardless
+// of zoom-based label hiding. Instead: show only the top drug hubs by
+// default (fixed radial layout, same deterministic-positioning approach
+// CaseGraph.tsx already uses successfully), and reveal one drug's disease
+// connections only when the user clicks that drug — so the graph never has
+// to render more than a handful of nodes at a time.
 export default function NetworkGraph({ signals }: Props) {
   const fgRef = useRef<any>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const drugHubs = useMemo(() => {
+    const byDrug = new Map<string, { count: number; topScore: number }>();
+    for (const s of signals) {
+      const existing = byDrug.get(s.drug);
+      if (existing) {
+        existing.count += 1;
+        existing.topScore = Math.max(existing.topScore, s.score);
+      } else {
+        byDrug.set(s.drug, { count: 1, topScore: s.score });
+      }
+    }
+    return [...byDrug.entries()]
+      .sort((a, b) => b[1].topScore - a[1].topScore || b[1].count - a[1].count)
+      .slice(0, MAX_HUBS)
+      .map(([drug, stats]) => ({ drug, ...stats }));
+  }, [signals]);
+
+  const hubDrugNames = useMemo(() => new Set(drugHubs.map((h) => h.drug)), [drugHubs]);
 
   const { nodes, links } = useMemo(() => {
     const nodeMap = new Map<string, GraphNode>();
     const links: GraphLink[] = [];
 
-    for (const s of signals) {
-      const drugId = `drug:${s.drug}`;
-      const diseaseId = `disease:${s.disease}`;
-      if (!nodeMap.has(drugId)) {
-        nodeMap.set(drugId, { id: drugId, label: s.drug, kind: "drug" });
-      }
-      if (!nodeMap.has(diseaseId)) {
-        nodeMap.set(diseaseId, { id: diseaseId, label: s.disease, kind: "disease" });
-      }
-      links.push({
-        source: drugId,
-        target: diseaseId,
-        score: s.score,
-        tier: scoreTier(s.score),
+    drugHubs.forEach((h, i) => {
+      const id = `drug:${h.drug}`;
+      const angle = (i / drugHubs.length) * 2 * Math.PI - Math.PI / 2;
+      nodeMap.set(id, {
+        id,
+        label: h.drug,
+        kind: "drug",
+        expanded: expanded.has(h.drug),
+        fx: Math.cos(angle) * HUB_RADIUS,
+        fy: Math.sin(angle) * HUB_RADIUS,
+      });
+    });
+
+    for (const drugName of expanded) {
+      const drugId = `drug:${drugName}`;
+      const hub = nodeMap.get(drugId);
+      if (!hub) continue;
+      const drugSignals = signals.filter((s) => s.drug === drugName);
+      const baseAngle = Math.atan2(hub.fy ?? 0, hub.fx ?? 0);
+      drugSignals.forEach((s, i) => {
+        const diseaseId = `disease:${drugName}:${s.disease}`;
+        if (nodeMap.has(diseaseId)) return;
+        const spread = Math.min(drugSignals.length, 8);
+        const offset = (i % spread) - (spread - 1) / 2;
+        const angle = baseAngle + offset * 0.28;
+        const r = (hub.fx! ** 2 + hub.fy! ** 2) ** 0.5 + DISEASE_RADIUS_STEP;
+        nodeMap.set(diseaseId, {
+          id: diseaseId,
+          label: s.disease,
+          kind: "disease",
+          fx: Math.cos(angle) * r,
+          fy: Math.sin(angle) * r,
+        });
+        links.push({ source: drugId, target: diseaseId, score: s.score, tier: scoreTier(s.score) });
       });
     }
 
     return { nodes: Array.from(nodeMap.values()), links };
-  }, [signals]);
+  }, [drugHubs, expanded, signals]);
 
-  // Default charge/link forces cluster everything too tightly to read once
-  // there are more than a handful of nodes — widen them out and frame the
-  // whole graph once the layout has had a moment to settle.
   useEffect(() => {
     const fg = fgRef.current;
     if (!fg) return;
-    fg.d3Force("charge")?.strength(-140);
-    fg.d3Force("link")?.distance(70);
-    const timer = setTimeout(() => fg.zoomToFit(500, 60), 400);
+    const timer = setTimeout(() => fg.zoomToFit(400, 70), 60);
     return () => clearTimeout(timer);
-  }, [nodes, links]);
+  }, [nodes.length]);
+
+  function toggleDrug(drug: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(drug)) next.delete(drug);
+      else next.add(drug);
+      return next;
+    });
+  }
 
   return (
     <div className="graph-wrap">
       <div className="graph-legend">
         <div className="graph-legend-item">
           <span className="graph-legend-swatch" style={{ background: DRUG_COLOR }} />
-          drug
+          drug (click to expand)
         </div>
         <div className="graph-legend-item">
           <span className="graph-legend-swatch" style={{ background: DISEASE_COLOR }} />
@@ -97,29 +153,36 @@ export default function NetworkGraph({ signals }: Props) {
           low
         </div>
       </div>
-      <div className="graph-hint">scroll to zoom for disease labels · drag to pan</div>
+      <div className="graph-hint">
+        showing the top {drugHubs.length} drugs by evidence strength · click a drug to reveal its
+        studied diseases · click again to collapse
+      </div>
       <ForceGraph2D
         ref={fgRef}
         graphData={{ nodes, links } as any}
         backgroundColor="#13161e"
+        cooldownTicks={1}
         nodeRelSize={4}
         nodeVal={(n: any) => ((n as GraphNode).kind === "drug" ? 10 : 4)}
-        nodeColor={(n: any) => ((n as GraphNode).kind === "drug" ? DRUG_COLOR : DISEASE_COLOR)}
+        nodeColor={(n: any) => {
+          const node = n as GraphNode;
+          if (node.kind === "disease") return DISEASE_COLOR;
+          return node.expanded ? DRUG_COLOR : DRUG_COLLAPSED_COLOR;
+        }}
         nodeLabel={(n: any) => (n as GraphNode).label}
+        onNodeClick={(n: any) => {
+          const node = n as GraphNode;
+          if (node.kind === "drug" && hubDrugNames.has(node.label)) toggleDrug(node.label);
+        }}
         linkColor={(l: any) => TIER_COLOR[(l as GraphLink).tier] ?? "#333"}
-        linkWidth={(l: any) => 0.6 + (l as GraphLink).score * 2.2}
+        linkWidth={(l: any) => 0.8 + (l as GraphLink).score * 2.2}
         linkDirectionalParticles={(l: any) => ((l as GraphLink).tier === "high" ? 2 : 0)}
         linkDirectionalParticleWidth={2}
         linkDirectionalParticleSpeed={0.004}
-        cooldownTicks={200}
+        enableNodeDrag={false}
         nodeCanvasObjectMode={() => "after"}
         nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
           const n = node as GraphNode;
-          // Disease labels only render once zoomed in — with hundreds of
-          // disease nodes, drawing every label at the overview level is
-          // unreadable clutter rather than useful detail. Drug labels
-          // (there are only ever a couple) always render.
-          if (n.kind === "disease" && globalScale < 2.2) return;
           const fontSize = (n.kind === "drug" ? 13 : 10) / globalScale;
           ctx.font = `${n.kind === "drug" ? "700" : "400"} ${fontSize}px "IBM Plex Mono", monospace`;
           ctx.textAlign = "center";

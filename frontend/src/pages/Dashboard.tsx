@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchSignals, listCases, recheckAllCases, type CaseSummary, type Signal } from "../api";
+import {
+  fetchSignals,
+  getConflicts,
+  listCases,
+  recheckAllCases,
+  type CaseConflictOut,
+  type CaseSummary,
+  type Signal,
+} from "../api";
 import { navigate } from "../router";
 import { scoreTier } from "../scoring";
 
@@ -16,6 +24,7 @@ function relativeDate(iso: string | null): string {
 export default function Dashboard() {
   const [cases, setCases] = useState<CaseSummary[] | null>(null);
   const [signals, setSignals] = useState<Signal[] | null>(null);
+  const [conflicts, setConflicts] = useState<CaseConflictOut[] | null>(null);
   const [checkingAll, setCheckingAll] = useState(false);
 
   const reloadCases = () => listCases().then(setCases).catch(() => setCases([]));
@@ -23,6 +32,7 @@ export default function Dashboard() {
   useEffect(() => {
     reloadCases();
     fetchSignals().then(setSignals).catch(() => setSignals([]));
+    getConflicts().then(setConflicts).catch(() => setConflicts([]));
   }, []);
 
   async function handleCheckAllSaved() {
@@ -44,14 +54,7 @@ export default function Dashboard() {
     () => (signals ?? []).filter((s) => scoreTier(s.score) === "high"),
     [signals]
   );
-  const totalConflicts = useMemo(
-    () => (cases ?? []).reduce((sum, c) => sum + (c.conflict_count ?? 0), 0),
-    [cases]
-  );
-  const casesWithConflicts = useMemo(
-    () => (cases ?? []).filter((c) => (c.conflict_count ?? 0) > 0),
-    [cases]
-  );
+  const conflictList = conflicts ?? [];
   const recentTrials = useMemo(() => {
     const seen = new Map<string, { drug: string; disease: string; date: string; url: string | null }>();
     for (const s of signals ?? []) {
@@ -67,7 +70,7 @@ export default function Dashboard() {
       .slice(0, 8);
   }, [signals]);
 
-  const loading = cases === null || signals === null;
+  const loading = cases === null || signals === null || conflicts === null;
 
   return (
     <div className="page">
@@ -130,40 +133,49 @@ export default function Dashboard() {
 
           <section className="dash-panel">
             <div className="dash-panel-head">
-              <h2>High-priority Signals</h2>
+              <h2>Safety / Context Flags</h2>
+              <span className="dash-panel-count mono status-critical">{conflictList.length}</span>
+            </div>
+            {conflictList.length === 0 ? (
+              <div className="dash-empty">No comorbidity conflicts detected across analyzed cases.</div>
+            ) : (
+              <ul className="dash-list">
+                {conflictList.slice(0, 8).map((c, i) => (
+                  <li
+                    key={`${c.case_id}-${c.drug}-${c.comorbidity}-${i}`}
+                    className="dash-list-row"
+                    onClick={() => navigate(`/cases/${c.case_id}`)}
+                  >
+                    <span className="dash-row-title">
+                      <strong>{c.drug}</strong> <span className="dash-row-arrow">&times;</span> {c.comorbidity}
+                    </span>
+                    <span className="dash-row-meta status-critical mono">
+                      {c.source === "openfda" ? "FDA label" : c.source}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {conflictList.length > 8 && (
+              <div className="dash-empty">{conflictList.length - 8} more — open a case to see the rest.</div>
+            )}
+          </section>
+
+          <section className="dash-panel dash-panel-secondary">
+            <div className="dash-panel-head">
+              <h2>Notable Research Signals</h2>
               <span className="dash-panel-count mono">{highPrioritySignals.length}</span>
             </div>
             {highPrioritySignals.length === 0 ? (
               <div className="dash-empty">No high-confidence signals in the current dataset.</div>
             ) : (
               <ul className="dash-list">
-                {highPrioritySignals.slice(0, 6).map((s) => (
+                {highPrioritySignals.slice(0, 5).map((s) => (
                   <li key={`${s.drug}-${s.disease}`} className="dash-list-row" onClick={() => navigate("/signals")}>
                     <span className="dash-row-title">
                       {s.drug} <span className="dash-row-arrow">&rarr;</span> {s.disease}
                     </span>
                     <span className="score-value high mono dash-row-score">{s.score.toFixed(2)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section className="dash-panel">
-            <div className="dash-panel-head">
-              <h2>Safety Conflicts Detected</h2>
-              <span className="dash-panel-count mono status-critical">{totalConflicts}</span>
-            </div>
-            {casesWithConflicts.length === 0 ? (
-              <div className="dash-empty">No comorbidity conflicts detected across analyzed cases.</div>
-            ) : (
-              <ul className="dash-list">
-                {casesWithConflicts.map((c) => (
-                  <li key={c.id} className="dash-list-row" onClick={() => navigate(`/cases/${c.id}`)}>
-                    <span className="dash-row-title">{c.primary_condition}</span>
-                    <span className="dash-row-meta status-critical mono">
-                      ⚠ {c.conflict_count} conflict{c.conflict_count === 1 ? "" : "s"}
-                    </span>
                   </li>
                 ))}
               </ul>

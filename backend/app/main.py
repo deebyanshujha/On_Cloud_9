@@ -15,14 +15,19 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 
 from app.core.case_analysis import analyze_case
+from app.core.config import SEARCH_RESULT_LIMIT
 from app.core.evidence_diff import diff_candidates
 from app.core.scoring import run_comparison
+from app.core.search import rank_search_results
+from app.core.terminology import search_conditions, search_medications
 from app.ingestion.store import (
     create_case,
+    find_matching_case,
     get_case,
     get_case_conditions,
     get_case_medications,
@@ -40,9 +45,16 @@ from app.ingestion.store import (
 )
 from app.models.case import CaseRecord
 from app.models.db import SessionLocal, init_db
-from app.schemas.api import SignalOut, build_signal_out
+from app.schemas.api import (
+    SearchResultsOut,
+    SignalOut,
+    TerminologyEntry,
+    TerminologySearchOut,
+    build_signal_out,
+)
 from app.schemas.case import (
     AnalysisResult,
+    CaseConflictOut,
     CaseCreate,
     CaseOut,
     CaseSummaryOut,
@@ -123,16 +135,51 @@ def signals_for_drug(drug: str, request: Request) -> list[SignalOut]:
     return matches
 
 
-@app.get("/search", response_model=list[SignalOut])
-def search(q: str, request: Request) -> list[SignalOut]:
+@app.get("/search", response_model=SearchResultsOut)
+def search(
+    q: str,
+    request: Request,
+    limit: int = Query(default=SEARCH_RESULT_LIMIT, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> SearchResultsOut:
+    """Bounded, ranked search over the in-memory signal feed (2026-08-20 fix
+    — see PROGRESS.md's data-imbalance/search-overwhelm audit). Ranking is
+    match-quality-first (exact > starts-with > substring, see
+    app/core/search.py), not insertion order; `limit`/`offset` bound how
+    much of that ranked list actually comes back per request, default from
+    config's SEARCH_RESULT_LIMIT — same env-var-driven pattern as the
+    discovery scan-budget knobs."""
     query = q.strip().lower()
     if not query:
-        return []
-    return [
-        s
-        for s in request.app.state.signals
-        if query in s.drug or query in s.disease
-    ]
+        return SearchResultsOut(results=[], total=0, limit=limit, offset=offset)
+
+    ranked = rank_search_results(request.app.state.signals, query)
+    page = ranked[offset : offset + limit]
+    return SearchResultsOut(results=page, total=len(ranked), limit=limit, offset=offset)
+
+
+@app.get("/medications/search", response_model=TerminologySearchOut)
+def medications_search(q: str = Query(default="")) -> TerminologySearchOut:
+    """Clean medication-name autocomplete for the New Case form — backed by
+    NLM's RxTerms (see app.core.terminology), never raw ingested
+    intervention names or openFDA label text."""
+    results, unavailable = search_medications(q)
+    return TerminologySearchOut(
+        results=[TerminologyEntry(name=r.name) for r in results],
+        source_unavailable=unavailable,
+    )
+
+
+@app.get("/conditions/search", response_model=TerminologySearchOut)
+def conditions_search(q: str = Query(default="")) -> TerminologySearchOut:
+    """Clean disease/condition-name autocomplete for the New Case form —
+    backed by NLM's `conditions` table (see app.core.terminology), never raw
+    trial titles or openFDA indications_and_usage paragraphs."""
+    results, unavailable = search_conditions(q)
+    return TerminologySearchOut(
+        results=[TerminologyEntry(name=r.name) for r in results],
+        source_unavailable=unavailable,
+    )
 
 
 # --- TheraLens: Cases -------------------------------------------------------
@@ -140,6 +187,20 @@ def search(q: str, request: Request) -> list[SignalOut]:
 # indications are already in arbitrage.db from the existing ingestion
 # pipeline — no new ingestion logic here, same "read layer over the existing
 # pipeline" pattern as /signals above.
+
+
+def _load_analysis_result(analysis_record) -> AnalysisResult | None:
+    """Stored analysis JSON predates a CandidateOut schema change (e.g. the
+    2026-08-20 redesign's evidence_tier/evidence_tier_reason fields) and no
+    longer validates — treat that the same as "never analyzed" rather than
+    500ing the whole page, since the fix (re-analyze) is a normal user
+    action already surfaced in the UI, not a data-loss situation."""
+    if analysis_record is None:
+        return None
+    try:
+        return AnalysisResult.model_validate_json(analysis_record.result_json)
+    except ValidationError:
+        return None
 
 
 def _case_out(session, case) -> CaseOut:
@@ -158,9 +219,9 @@ def _case_summary(case, analysis_record, evidence_check_record=None) -> CaseSumm
     top_score: float | None = None
     last_analyzed_at = None
 
-    if analysis_record is not None:
+    result = _load_analysis_result(analysis_record)
+    if result is not None:
         last_analyzed_at = analysis_record.analyzed_at
-        result = AnalysisResult.model_validate_json(analysis_record.result_json)
         candidate_count = len(result.candidates)
         conflict_count = sum(
             1
@@ -208,9 +269,26 @@ def list_cases_endpoint() -> list[CaseSummaryOut]:
 
 @app.post("/cases", response_model=CaseOut)
 def create_case_endpoint(payload: CaseCreate) -> CaseOut:
+    """Duplicate-case guard (2026-08-20 redesign): submitting the exact same
+    primary condition + comorbidity set + medication set twice reuses the
+    existing case (200, same id) instead of creating a lookalike duplicate,
+    unless the caller explicitly opts in with allow_duplicate=true. Returning
+    200 with the pre-existing case (not a 409) keeps the New Case form's
+    happy path a single call either way — "create or resume" reads as one
+    action to the caller, not two different outcomes to branch on."""
     init_db()
     session = SessionLocal()
     try:
+        if not payload.allow_duplicate:
+            existing = find_matching_case(
+                session,
+                primary_condition=payload.primary_condition,
+                comorbidities=payload.comorbidities,
+                current_medications=payload.current_medications,
+            )
+            if existing is not None:
+                return _case_out(session, existing)
+
         case = create_case(
             session,
             primary_condition=payload.primary_condition,
@@ -218,6 +296,44 @@ def create_case_endpoint(payload: CaseCreate) -> CaseOut:
             current_medications=payload.current_medications,
         )
         return _case_out(session, case)
+    finally:
+        session.close()
+
+
+@app.get("/cases/conflicts", response_model=list[CaseConflictOut])
+def list_case_conflicts() -> list[CaseConflictOut]:
+    """Cross-case, source-backed safety/context flags for the dashboard —
+    every 'conflict_detected' comorbidity check across every saved case's
+    last analysis, read straight off the already-stored result JSON (no
+    recomputation, same read-layer pattern as everything else here). Lets
+    the dashboard show 'Drug X — potential conflict with Heart Failure — FDA
+    label — [evidence excerpt]' instead of a bare per-case count."""
+    init_db()
+    session = SessionLocal()
+    try:
+        out: list[CaseConflictOut] = []
+        for case in list_cases(session):
+            if not case.saved:
+                continue
+            analysis_record = load_case_analysis(session, case.id)
+            result = _load_analysis_result(analysis_record)
+            if result is None:
+                continue
+            for candidate in result.candidates:
+                for check in candidate.comorbidity_checks:
+                    if check.status != "conflict_detected":
+                        continue
+                    out.append(
+                        CaseConflictOut(
+                            case_id=case.id,
+                            primary_condition=case.primary_condition,
+                            drug=candidate.drug,
+                            comorbidity=check.comorbidity,
+                            evidence_excerpt=check.evidence,
+                            source="openfda",
+                        )
+                    )
+        return out
     finally:
         session.close()
 
@@ -232,11 +348,7 @@ def get_case_endpoint(case_id: int) -> CaseWithAnalysis:
             raise HTTPException(status_code=404, detail=f"No case found with id {case_id}")
 
         analysis_record = load_case_analysis(session, case_id)
-        last_analysis = (
-            AnalysisResult.model_validate_json(analysis_record.result_json)
-            if analysis_record is not None
-            else None
-        )
+        last_analysis = _load_analysis_result(analysis_record)
         evidence_check_record = load_evidence_check(session, case_id)
         last_evidence_check = (
             EvidenceCheckResult.model_validate_json(evidence_check_record.result_json)
@@ -319,9 +431,9 @@ def _run_recheck(session, case: CaseRecord) -> EvidenceCheckResult | None:
     """Returns None if this case has never been saved with an analysis
     snapshot to compare against (nothing to re-check yet)."""
     snapshot_record = load_case_snapshot(session, case.id)
-    if snapshot_record is None:
+    snapshot = _load_analysis_result(snapshot_record)
+    if snapshot is None:
         return None
-    snapshot = AnalysisResult.model_validate_json(snapshot_record.result_json)
 
     comorbidities = get_case_conditions(session, case.id)
     documents = load_all_documents(session)

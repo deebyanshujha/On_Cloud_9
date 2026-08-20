@@ -21,6 +21,13 @@ class CaseCreate(BaseModel):
     primary_condition: str
     comorbidities: list[str] = Field(default_factory=list)
     current_medications: list[str] = Field(default_factory=list)
+    allow_duplicate: bool = Field(
+        default=False,
+        description="If false (default) and an existing case has the exact "
+        "same primary condition + comorbidity set + medication set, that "
+        "existing case is returned instead of creating a lookalike "
+        "duplicate. Set true to explicitly create a separate case anyway.",
+    )
 
 
 class CaseUpdate(BaseModel):
@@ -115,6 +122,17 @@ class CandidateOut(BaseModel):
         description="What this drug is already FDA-approved for, per "
         "ingested openFDA label text."
     )
+    evidence_tier: str = Field(
+        description="One of 'high'/'moderate'/'low'/'insufficient' — same "
+        "thresholds as app.core.case_analysis.evidence_tier and "
+        "frontend/src/scoring.ts's scoreTier, kept in sync so the tier "
+        "shown never disagrees across the app."
+    )
+    evidence_tier_reason: str = Field(
+        description="Short, human-readable basis for the tier, built from "
+        "real supporting-evidence counts (e.g. '3 clinical trials, 2 "
+        "publications') — never a fabricated explanation."
+    )
     primary_condition_evidence: list[SupportingEvidence]
     comorbidity_checks: list[ComorbidityCheck]
     current_medication_interactions: CurrentMedicationInteractionNote
@@ -191,6 +209,21 @@ class CaseWithAnalysis(BaseModel):
     case: CaseOut
     last_analysis: Optional[AnalysisResult] = None
     last_evidence_check: Optional[EvidenceCheckResult] = None
+
+
+class CaseConflictOut(BaseModel):
+    """One source-backed safety/context flag for the dashboard's
+    cross-case conflict list (GET /cases/conflicts) — every field here
+    traces to a real ComorbidityCheck with status 'conflict_detected' on a
+    saved case's last analysis, never inferred from two strings merely
+    looking related."""
+
+    case_id: int
+    primary_condition: str
+    drug: str
+    comorbidity: str
+    evidence_excerpt: Optional[str]
+    source: str = Field(description="Where the conflict evidence came from, e.g. 'openfda'.")
 
 
 class RecheckAllResult(BaseModel):

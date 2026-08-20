@@ -17,7 +17,7 @@ from typing import Iterator
 import httpx
 
 from app.core.config import MAX_RESULTS_PER_SOURCE, PAGE_SIZE, TIME_WINDOW_DAYS
-from app.core.drug_normalization import normalize_drug_name
+from app.core.drug_normalization import is_junk_drug_name, normalize_drug_name
 from app.schemas.document import Document
 
 CTGOV_STUDIES_URL = "https://clinicaltrials.gov/api/v2/studies"
@@ -209,6 +209,8 @@ def extract_drug_names(study: dict) -> list[str]:
     seen: dict[str, None] = {}
     for i in interventions:
         if i.get("type") != "DRUG" or not i.get("name"):
+            continue
+        if is_junk_drug_name(i["name"]):
             continue
         normalized = normalize_drug_name(i["name"])
         if normalized:

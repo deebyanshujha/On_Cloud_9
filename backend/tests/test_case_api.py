@@ -447,6 +447,161 @@ def test_get_case_includes_last_evidence_check(client):
     assert after["last_evidence_check"]["has_new_evidence"] is False
 
 
+# --- Duplicate-case prevention (TheraLens redesign Phase A, 2026-08-20) ----
+
+
+def test_submitting_same_case_twice_reuses_existing_case(client):
+    first = client.post(
+        "/cases",
+        json={
+            "primary_condition": "pancreatic cancer",
+            "comorbidities": ["renal impairment"],
+            "current_medications": ["metformin"],
+        },
+    ).json()
+    second = client.post(
+        "/cases",
+        json={
+            "primary_condition": "Pancreatic Cancer",
+            "comorbidities": ["Renal Impairment"],
+            "current_medications": ["Metformin"],
+        },
+    ).json()
+
+    assert second["id"] == first["id"]
+    assert len(client.get("/cases").json()) == 1
+
+
+def test_allow_duplicate_creates_a_second_case(client):
+    first = client.post(
+        "/cases",
+        json={"primary_condition": "pancreatic cancer", "comorbidities": [], "current_medications": []},
+    ).json()
+    second = client.post(
+        "/cases",
+        json={
+            "primary_condition": "pancreatic cancer",
+            "comorbidities": [],
+            "current_medications": [],
+            "allow_duplicate": True,
+        },
+    ).json()
+
+    assert second["id"] != first["id"]
+    assert len(client.get("/cases").json()) == 2
+
+
+def test_different_comorbidities_are_not_treated_as_duplicates(client):
+    first = client.post(
+        "/cases",
+        json={"primary_condition": "pancreatic cancer", "comorbidities": [], "current_medications": []},
+    ).json()
+    second = client.post(
+        "/cases",
+        json={"primary_condition": "pancreatic cancer", "comorbidities": ["renal impairment"], "current_medications": []},
+    ).json()
+
+    assert second["id"] != first["id"]
+
+
+# --- Cross-case conflicts endpoint ------------------------------------------
+
+
+def test_conflicts_endpoint_empty_when_no_saved_cases_have_conflicts(client):
+    response = client.get("/cases/conflicts")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_conflicts_endpoint_surfaces_source_backed_conflict(client):
+    from app.ingestion.store import upsert_approved_indications, upsert_documents
+    from app.schemas.document import ApprovedIndication, Document
+    from datetime import date
+
+    main_module.init_db()
+    session = main_module.SessionLocal()
+    upsert_documents(
+        session,
+        [
+            Document(
+                drug="metformin",
+                disease="stage iv pancreatic cancer",
+                source="clinicaltrials",
+                source_id="NCT-CONFLICT-0001",
+                phase="phase 2",
+                date=date(2026, 1, 1),
+            )
+        ],
+    )
+    upsert_approved_indications(
+        session,
+        [
+            ApprovedIndication(
+                drug="metformin",
+                disease="type 2 diabetes mellitus",
+                source="openfda",
+                source_id="LABEL-CONFLICT-0001",
+                contraindications="Contraindicated in patients with severe renal impairment.",
+            )
+        ],
+    )
+    session.close()
+
+    created = client.post(
+        "/cases",
+        json={
+            "primary_condition": "pancreatic cancer",
+            "comorbidities": ["renal impairment"],
+            "current_medications": [],
+        },
+    ).json()
+    client.post(f"/cases/{created['id']}/analyze")
+
+    # Unsaved case: should not appear in the conflicts list yet.
+    assert client.get("/cases/conflicts").json() == []
+
+    client.patch(f"/cases/{created['id']}", json={"saved": True})
+
+    response = client.get("/cases/conflicts")
+    assert response.status_code == 200
+    conflicts = response.json()
+    assert len(conflicts) == 1
+    conflict = conflicts[0]
+    assert conflict["case_id"] == created["id"]
+    assert conflict["drug"] == "metformin"
+    assert conflict["comorbidity"] == "renal impairment"
+    assert "renal impairment" in conflict["evidence_excerpt"].lower()
+    assert conflict["source"] == "openfda"
+
+
+# --- Clean medication/condition autocomplete endpoints ----------------------
+
+
+def test_medications_search_returns_clean_names(client, monkeypatch):
+    from app.core.terminology import TerminologyResult
+
+    monkeypatch.setattr(
+        main_module, "search_medications", lambda q: ([TerminologyResult("Metformin")], False)
+    )
+    response = client.get("/medications/search", params={"q": "met"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["results"] == [{"name": "Metformin"}]
+    assert body["source_unavailable"] is False
+
+
+def test_conditions_search_returns_clean_names(client, monkeypatch):
+    from app.core.terminology import TerminologyResult
+
+    monkeypatch.setattr(
+        main_module, "search_conditions", lambda q: ([TerminologyResult("Heart Failure")], False)
+    )
+    response = client.get("/conditions/search", params={"q": "heart"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["results"] == [{"name": "Heart Failure"}]
+
+
 def test_list_cases_reflects_has_new_evidence_after_recheck(client):
     _seed_pancreatic_cancer_data(source_id="NCT-TEST-0001")
     created = client.post(

@@ -10,7 +10,12 @@ import json
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.drug_normalization import normalize_drug_name, resolve_rxnorm_id
+from app.core.drug_normalization import (
+    DRUG_CLASS_ALLOWLIST,
+    is_junk_drug_name,
+    normalize_drug_name,
+    resolve_rxnorm_id,
+)
 from app.core.scoring import normalize as normalize_disease_text
 from app.models.approved_indication import ApprovedIndicationRecord
 from app.models.case import (
@@ -128,7 +133,15 @@ def upsert_known_drug(
     `last_seen` bumped), new canonical name -> new row. Returns the
     canonical name so callers (openFDA reactive lookup, discovery ingestion)
     can key off it. Never resets/replaces the table — it only grows or
-    merges across runs."""
+    merges across runs.
+
+    Rejects junk (placebo/comparator/procedure arms, bare cohort labels —
+    see app.core.drug_normalization.is_junk_drug_name) before it ever
+    enters the cache, returning "" so callers treat it the same as an
+    empty/unnormalizable name."""
+    if is_junk_drug_name(raw_name):
+        return ""
+
     canonical = normalize_drug_name(raw_name)
     if not canonical:
         return canonical
@@ -141,10 +154,12 @@ def upsert_known_drug(
 
     if record is None:
         rxnorm_id = resolve_rxnorm_id(canonical) if resolve_rxnorm else None
+        entity_type = "drug_class" if canonical in DRUG_CLASS_ALLOWLIST else "drug"
         record = KnownDrugRecord(
             canonical_name=canonical,
             name_variants=json.dumps([raw_stripped]),
             rxnorm_id=rxnorm_id,
+            entity_type=entity_type,
         )
         session.add(record)
     else:
@@ -223,6 +238,35 @@ def create_case(
     session.commit()
     session.refresh(case)
     return case
+
+
+def find_matching_case(
+    session: Session,
+    primary_condition: str,
+    comorbidities: list[str],
+    current_medications: list[str],
+) -> CaseRecord | None:
+    """Duplicate-case guard: finds an existing case whose normalized primary
+    condition matches AND whose comorbidity/medication sets match exactly
+    (order-independent — free-text entry order shouldn't create a
+    "different" case). Only exact-set matches count as a duplicate; a case
+    with one extra or missing comorbidity is a genuinely different research
+    question, not a duplicate, so it's left alone."""
+    normalized_condition = normalize_disease_text(primary_condition)
+    target_comorbidities = {normalize_disease_text(c) for c in comorbidities if normalize_disease_text(c)}
+    target_medications = {normalize_drug_name(m) for m in current_medications if normalize_drug_name(m)}
+
+    candidates = session.execute(
+        select(CaseRecord).where(CaseRecord.primary_condition == normalized_condition)
+    ).scalars().all()
+
+    for candidate in candidates:
+        existing_comorbidities = set(get_case_conditions(session, candidate.id))
+        existing_medications = set(get_case_medications(session, candidate.id))
+        if existing_comorbidities == target_comorbidities and existing_medications == target_medications:
+            return candidate
+
+    return None
 
 
 def get_case(session: Session, case_id: int) -> CaseRecord | None:

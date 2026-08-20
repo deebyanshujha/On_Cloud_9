@@ -37,6 +37,30 @@ class SignalOut(BaseModel):
     sources: list[SourceLink]
 
 
+class TerminologyEntry(BaseModel):
+    """One clean, structured autocomplete entity — never a raw label
+    paragraph or trial title (see app.core.terminology)."""
+
+    name: str
+
+
+class TerminologySearchOut(BaseModel):
+    results: list[TerminologyEntry]
+    source_unavailable: bool = False
+
+
+class SearchResultsOut(BaseModel):
+    """Bounded, ranked page of /search results (2026-08-20 fix — see
+    PROGRESS.md). `total` is the full match count before limit/offset are
+    applied, so the frontend can show "N of M" and offer a "load more" page
+    without a second round-trip just to find out how many there are."""
+
+    results: list[SignalOut]
+    total: int
+    limit: int
+    offset: int
+
+
 def build_signal_out(signal: Signal) -> SignalOut:
     docs = signal.supporting_documents
     dated = [d.date for d in docs if d.date is not None]

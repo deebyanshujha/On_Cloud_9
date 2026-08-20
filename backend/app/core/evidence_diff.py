@@ -57,14 +57,14 @@ def _build_summary(
 ) -> str:
     parts: list[str] = []
     if is_new:
-        parts.append(f"New research candidate detected ({TIER_LABEL[tier_after]} evidence).")
+        parts.append(f"New candidate found ({TIER_LABEL[tier_after]} evidence).")
     elif tier_before is not None and tier_before != tier_after:
         parts.append(
             f"Evidence strength changed: {TIER_LABEL[tier_before]} -> {TIER_LABEL[tier_after]}."
         )
     if new_source_ids:
         n = len(new_source_ids)
-        parts.append(f"{n} new supporting source{'s' if n != 1 else ''} since last check.")
+        parts.append(f"{n} new source{'s' if n != 1 else ''} found since you last checked.")
     if newly_conflicted:
         parts.append(
             "New context conflict(s) detected: "
