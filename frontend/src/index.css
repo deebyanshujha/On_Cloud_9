@@ -2913,3 +2913,918 @@ input:focus-visible {
   color: var(--text-dim);
   line-height: 1.5;
 }
+
+/* ========================================================================
+   RESEARCH DISCUSSION / COMMUNITY THREADS
+   All classes prefixed with disc- to avoid collisions with existing styles.
+   All values reference existing design tokens — no new colors or fonts.
+   ======================================================================== */
+
+/* --- page header -------------------------------------------------------- */
+
+.disc-page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.disc-page-title-area {
+  flex: 1;
+  min-width: 260px;
+}
+
+/* --- controls bar ------------------------------------------------------- */
+
+.disc-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 14px 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.disc-search-field {
+  flex: 1;
+  min-width: 200px;
+  max-width: 380px;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  background: var(--color-surface);
+  color: var(--color-ink-faint);
+  font: 12px var(--font-data);
+}
+
+.disc-search-field input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-ink);
+  font: 12px var(--font-data);
+}
+
+.disc-search-field input::placeholder { color: var(--color-ink-faint); }
+
+/* --- new thread button -------------------------------------------------- */
+
+.btn {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) { background: var(--color-accent-strong); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.disc-new-thread-btn {
+  align-self: flex-start;
+  white-space: nowrap;
+  margin-top: 4px;
+}
+
+/* --- stats row (reuses .summary-row / .stat-chip) ----------------------- */
+
+.disc-stats-row {
+  margin: 0 0 6px;
+}
+
+/* --- context banner (pre-filtered from drug/signal pages) --------------- */
+
+.disc-context-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--color-info-soft);
+  border-left: 3px solid var(--color-info);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.disc-context-banner-label {
+  font-family: var(--font-data);
+  font-weight: 600;
+  color: var(--color-info);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+}
+
+.disc-context-banner-chip {
+  font-family: var(--font-data);
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.disc-context-banner-arrow {
+  color: var(--color-ink-muted);
+}
+
+.disc-context-banner-clear {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: var(--font-data);
+  margin-left: auto;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+.disc-context-banner-clear:hover { color: var(--color-accent); }
+
+/* context chip colors */
+.disc-context-drug {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+  font-weight: 600;
+}
+
+.disc-context-disease {
+  background: var(--color-info-soft);
+  color: var(--color-info);
+  font-weight: 600;
+}
+
+.disc-context-arrow {
+  color: var(--color-ink-muted);
+  font-size: 12px;
+}
+
+/* --- thread list table -------------------------------------------------- */
+
+.disc-thread-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-top: 16px;
+}
+
+.disc-thread-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: var(--color-surface-muted);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-ink-muted);
+}
+
+.disc-thread-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  background: var(--color-surface);
+  transition: background 0.15s ease;
+}
+
+.disc-thread-row:last-child { border-bottom: none; }
+.disc-thread-row:hover { background: var(--surface-hover); }
+
+.disc-thread-pinned {
+  background: rgba(8, 127, 104, 0.04);
+  border-left: 3px solid var(--color-good);
+}
+.disc-thread-pinned:hover { background: rgba(8, 127, 104, 0.08); }
+
+.disc-thread-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.disc-thread-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.disc-thread-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-ink);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.disc-thread-row:hover .disc-thread-title { color: var(--color-accent); }
+
+.disc-pin-icon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.disc-thread-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.disc-thread-author {
+  font-size: 12px;
+  color: var(--color-ink-muted);
+}
+
+.disc-thread-date {
+  font-size: 11px;
+  color: var(--color-ink-faint);
+  font-family: var(--font-data);
+}
+
+.disc-thread-dot {
+  color: var(--color-ink-faint);
+  font-size: 10px;
+}
+
+/* --- per-thread stats --------------------------------------------------- */
+
+.disc-thread-stats {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.disc-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 40px;
+}
+
+.disc-stat-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-ink);
+  line-height: 1;
+}
+
+.disc-stat-label {
+  font-size: 10px;
+  color: var(--color-ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: var(--font-data);
+}
+
+.disc-stat-likes .disc-stat-value { color: var(--color-accent); }
+.disc-stat-activity { min-width: 60px; }
+.disc-stat-activity .disc-stat-label { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--color-ink-muted); }
+
+/* --- category badges ---------------------------------------------------- */
+
+.disc-category-badge {
+  display: inline-block;
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+/* Each category gets a subtle, warm, accessible tint */
+.disc-cat-drug-repurposing       { background: var(--color-accent-soft);    color: var(--color-accent-strong); }
+.disc-cat-clinical-trials        { background: var(--color-info-soft);       color: var(--color-info); }
+.disc-cat-biomedical-research    { background: var(--color-good-soft);       color: var(--color-good); }
+.disc-cat-drug-safety            { background: var(--color-warning-soft);    color: var(--color-warning); }
+.disc-cat-research-opportunities { background: var(--color-danger-soft);     color: var(--color-danger); }
+.disc-cat-general-discussion     { background: var(--color-surface-muted);   color: var(--color-ink-muted); }
+
+/* --- context pill (inside thread rows) ---------------------------------- */
+
+.disc-context-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-family: var(--font-data);
+}
+
+/* --- empty states ------------------------------------------------------- */
+
+.disc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.disc-empty-icon {
+  font-size: 40px;
+  opacity: 0.5;
+}
+
+/* --- THREAD DETAIL PAGE ------------------------------------------------- */
+
+.disc-thread-page {
+  max-width: 860px;
+}
+
+.disc-thread-breadcrumb {
+  margin-bottom: 20px;
+}
+
+/* --- thread header ------------------------------------------------------ */
+
+.disc-thread-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+
+.disc-thread-context-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-family: var(--font-data);
+  color: var(--color-ink-muted);
+  flex-wrap: wrap;
+}
+
+.disc-context-label {
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-ink-faint);
+  margin-left: 4px;
+}
+
+.disc-context-link {
+  appearance: none;
+  border: none;
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+  font: 600 12px var(--font-data);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.disc-context-link:hover { background: var(--color-accent); color: #fff; }
+
+.disc-thread-context-arrow {
+  color: var(--color-ink-muted);
+}
+
+.disc-thread-title-h1 {
+  font-family: var(--font-display);
+  font-size: clamp(22px, 2.4vw, 34px);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  margin: 0;
+  color: var(--color-ink);
+}
+
+.disc-thread-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+}
+
+.disc-stat-inline {
+  font-size: 12px;
+  color: var(--color-ink-muted);
+}
+
+/* --- posts (original + replies) ----------------------------------------- */
+
+.disc-post {
+  display: flex;
+  gap: 16px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.disc-post-original {
+  padding-top: 0;
+}
+
+.disc-post-avatar {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.disc-avatar-initial {
+  font-family: var(--font-data);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+.disc-post-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.disc-post-author-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.disc-post-author {
+  font-size: 13px;
+  color: var(--color-ink);
+}
+
+.disc-post-time {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--color-ink-faint);
+}
+
+.disc-reply-index {
+  font-size: 10px;
+  color: var(--color-ink-faint);
+  margin-left: auto;
+}
+
+.disc-post-body {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--color-ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.disc-post-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+/* --- like button -------------------------------------------------------- */
+
+.disc-like-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.disc-like-btn:hover:not(:disabled) {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+
+.disc-like-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.disc-like-icon {
+  font-size: 10px;
+  color: var(--color-accent);
+}
+
+.disc-like-count {
+  min-width: 16px;
+  text-align: center;
+}
+
+.disc-reply-action {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--color-ink-muted);
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s ease;
+}
+.disc-reply-action:hover { color: var(--color-accent); }
+
+/* --- replies header ----------------------------------------------------- */
+
+.disc-replies-header {
+  padding: 12px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.disc-replies-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.disc-replies-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- compose form ------------------------------------------------------- */
+
+.disc-compose-section {
+  margin-top: 32px;
+  padding: 24px;
+  background: var(--color-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.disc-compose-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.disc-compose-note {
+  font-size: 11px;
+  color: var(--color-warning);
+  font-family: var(--font-data);
+}
+
+.disc-compose-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.disc-compose-form .filter-field,
+.disc-modal-field {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 7px;
+  width: 100%;
+}
+
+.disc-modal-field .form-input,
+.disc-compose-form .filter-field .form-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.disc-author-field {
+  max-width: 320px;
+}
+
+.disc-body-field {
+  flex: 1;
+}
+
+.disc-textarea {
+  resize: vertical;
+  min-height: 120px;
+  font-size: 13px;
+  line-height: 1.6;
+  width: 100%;
+}
+
+.disc-compose-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+/* --- form error --------------------------------------------------------- */
+
+.disc-form-error {
+  font-size: 12px;
+  color: var(--color-danger);
+  font-family: var(--font-data);
+  background: var(--color-danger-soft);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--color-danger);
+}
+
+.disc-like-error {
+  margin-top: 4px;
+}
+
+/* --- NEW THREAD MODAL --------------------------------------------------- */
+
+.disc-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 36, 33, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 100;
+  padding: clamp(16px, 5vh, 48px) 20px 20px;
+  overflow-y: auto;
+}
+
+.disc-modal {
+  background: var(--color-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  width: 100%;
+  max-width: 620px;
+  max-height: calc(100vh - clamp(36px, 10vh, 96px));
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(28, 36, 33, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.disc-modal-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.disc-modal-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--color-ink);
+  margin: 0;
+  flex: 1;
+}
+
+.disc-modal-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: var(--font-data);
+  margin-top: 6px;
+}
+
+.disc-modal-close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--color-ink-faint);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  align-self: flex-start;
+  transition: color 0.15s ease;
+}
+.disc-modal-close:hover { color: var(--color-accent); }
+
+.disc-modal-form {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 24px 24px;
+}
+
+.disc-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.disc-required {
+  color: var(--color-accent);
+  font-size: 12px;
+}
+
+.disc-char-count {
+  font-size: 10px;
+  color: var(--color-ink-faint);
+  text-align: right;
+  margin-top: 2px;
+  display: block;
+}
+
+/* --- DISCUSS BUTTON (on OpportunityCard) -------------------------------- */
+
+.disc-opp-discuss-row {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+
+.disc-discuss-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  appearance: none;
+  border: 1px solid var(--color-info);
+  background: var(--color-info-soft);
+  color: var(--color-info);
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.disc-discuss-btn:hover {
+  background: var(--color-info);
+  color: #fff;
+}
+
+.disc-discuss-btn-sm {
+  font-size: 11px;
+  padding: 5px 10px;
+}
+
+.disc-discuss-icon { font-size: 14px; }
+
+/* --- DRUG EXPLORER community section ------------------------------------ */
+
+.disc-drug-community-section {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.disc-drug-community-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 0 !important;
+}
+
+.disc-view-all-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--color-accent);
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+  transition: opacity 0.15s ease;
+}
+.disc-view-all-btn:hover { opacity: 0.75; }
+
+.disc-drug-community-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  padding: 10px 0;
+  flex-wrap: wrap;
+}
+
+.disc-drug-thread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.disc-drug-thread-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  appearance: none;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  border: 1px solid var(--border);
+  background: var(--color-surface);
+  margin-bottom: 4px;
+}
+.disc-drug-thread-row:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.disc-drug-thread-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink);
+  line-height: 1.3;
+}
+
+.disc-drug-thread-meta {
+  font-size: 11px;
+  color: var(--color-ink-faint);
+}
+
+/* --- form-input (shared, only if not already defined) ------------------- */
+
+.form-input:not([type="checkbox"]):not([type="radio"]) {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.form-input:not([type="checkbox"]):not([type="radio"]):focus {
+  border-color: var(--color-accent);
+}
+
+/* --- responsive --------------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .disc-page-head { flex-direction: column; }
+  .disc-new-thread-btn { width: 100%; }
+  .disc-thread-stats { gap: 10px; }
+  .disc-stat { min-width: 32px; }
+  .disc-thread-row { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .disc-modal { max-width: 100%; border-radius: 0; max-height: calc(100vh - 24px); }
+}

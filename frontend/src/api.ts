@@ -56,6 +56,15 @@ export interface ScholarProfile {
   id: number;
   email: string;
   username: string;
+  full_name?: string | null;
+  organization?: string | null;
+  organization_id?: string | null;
+  phone_number?: string | null;
+  experience?: string | null;
+  title?: string | null;
+  orcid_id?: string | null;
+  linkedin_profile?: string | null;
+  research_interests?: string | null;
   role: "scholar";
   created_at: string | null;
 }
@@ -391,4 +400,137 @@ export function searchMedications(query: string): Promise<TerminologySearchResul
 export function searchConditions(query: string): Promise<TerminologySearchResult> {
   const params = new URLSearchParams({ q: query });
   return getJson<TerminologySearchResult>(`/conditions/search?${params.toString()}`);
+}
+
+// --- Research Discussion / Community Threads --------------------------------
+
+export const DISCUSSION_CATEGORIES = [
+  "Drug Repurposing",
+  "Clinical Trials",
+  "Biomedical Research",
+  "Drug Safety",
+  "Research Opportunities",
+  "General Discussion",
+] as const;
+
+export type DiscussionCategory = (typeof DISCUSSION_CATEGORIES)[number];
+
+export interface ThreadSummary {
+  id: number;
+  title: string;
+  category: string;
+  author: string;
+  pinned: boolean;
+  drug_name: string | null;
+  disease_name: string | null;
+  signal_key: string | null;
+  reply_count: number;
+  like_count: number;
+  created_at: string;
+  last_activity_at: string;
+}
+
+export interface DiscussionReply {
+  id: number;
+  thread_id: number;
+  body: string;
+  author: string;
+  like_count: number;
+  created_at: string;
+}
+
+export interface ThreadDetail extends ThreadSummary {
+  body: string;
+  replies: DiscussionReply[];
+}
+
+export interface ThreadListResult {
+  threads: ThreadSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ThreadCreateInput {
+  title: string;
+  category: string;
+  body: string;
+  author: string;
+  drug_name?: string | null;
+  disease_name?: string | null;
+  signal_key?: string | null;
+}
+
+export interface ReplyCreateInput {
+  body: string;
+  author: string;
+}
+
+export interface LikeResult {
+  target_type: string;
+  target_id: number;
+  liked: boolean;
+  new_count: number;
+}
+
+export type DiscussionSortOrder = "newest" | "active" | "discussed";
+
+export interface ListDiscussionsParams {
+  q?: string;
+  category?: string;
+  drug?: string;
+  disease?: string;
+  signal_key?: string;
+  sort?: DiscussionSortOrder;
+  limit?: number;
+  offset?: number;
+}
+
+export function listDiscussions(params: ListDiscussionsParams = {}): Promise<ThreadListResult> {
+  const p = new URLSearchParams();
+  if (params.q) p.set("q", params.q);
+  if (params.category) p.set("category", params.category);
+  if (params.drug) p.set("drug", params.drug);
+  if (params.disease) p.set("disease", params.disease);
+  if (params.signal_key) p.set("signal_key", params.signal_key);
+  if (params.sort) p.set("sort", params.sort);
+  if (params.limit != null) p.set("limit", String(params.limit));
+  if (params.offset != null) p.set("offset", String(params.offset));
+  return getJson<ThreadListResult>(`/discussions?${p.toString()}`);
+}
+
+export function getDiscussionsByContext(opts: {
+  drug?: string;
+  disease?: string;
+  signal_key?: string;
+  limit?: number;
+}): Promise<ThreadListResult> {
+  const p = new URLSearchParams();
+  if (opts.drug) p.set("drug", opts.drug);
+  if (opts.disease) p.set("disease", opts.disease);
+  if (opts.signal_key) p.set("signal_key", opts.signal_key);
+  if (opts.limit != null) p.set("limit", String(opts.limit));
+  return getJson<ThreadListResult>(`/discussions/by-context?${p.toString()}`);
+}
+
+export function getDiscussion(id: number): Promise<ThreadDetail> {
+  return getJson<ThreadDetail>(`/discussions/${id}`);
+}
+
+export function createDiscussion(input: ThreadCreateInput): Promise<ThreadDetail> {
+  return sendJson<ThreadDetail>("/discussions", "POST", input);
+}
+
+export function postReply(threadId: number, input: ReplyCreateInput): Promise<DiscussionReply> {
+  return sendJson<DiscussionReply>(`/discussions/${threadId}/replies`, "POST", input);
+}
+
+export function likeThread(threadId: number, author: string): Promise<LikeResult> {
+  const p = new URLSearchParams({ author });
+  return sendJson<LikeResult>(`/discussions/${threadId}/like?${p.toString()}`, "POST");
+}
+
+export function likeReply(replyId: number, author: string): Promise<LikeResult> {
+  const p = new URLSearchParams({ author });
+  return sendJson<LikeResult>(`/discussions/replies/${replyId}/like?${p.toString()}`, "POST");
 }

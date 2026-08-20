@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
+from sqlalchemy import desc, func as sa_func
 
 from app.core.case_analysis import analyze_case
 from app.core.auth import create_access_token, find_user, get_current_scholar, hash_password, profile_for, verify_password
@@ -73,6 +74,16 @@ from app.schemas.auth import (
     AuthSession, ScholarContributionCreate, ScholarContributionOut, ScholarCredentials,
     ScholarLogin, ScholarProfile, ScholarProfileUpdate,
 )
+from app.schemas.discussion import (
+    LikeOut,
+    ReplyCreate,
+    ReplyOut,
+    ThreadCreate,
+    ThreadListOut,
+    ThreadOut,
+    ThreadSummaryOut,
+)
+from app.models.discussion import DiscussionLike, DiscussionReply, DiscussionThread
 
 
 def _cache_source_ids(records) -> tuple[set[str], set[str]]:
@@ -687,5 +698,320 @@ def recheck_all_cases_endpoint() -> RecheckAllResult:
             cases_with_new_evidence_count=sum(1 for r in results if r.has_new_evidence),
             results=results,
         )
+    finally:
+        session.close()
+
+
+# --- Research Discussion / Community Threads --------------------------------
+# New feature: a researcher-focused discussion system that lives alongside
+# the existing signal/drug/case pages. All data persists in the same
+# arbitrage.db; patterns follow the existing read-layer endpoints above.
+
+
+def _thread_summary(t: DiscussionThread) -> ThreadSummaryOut:
+    return ThreadSummaryOut(
+        id=t.id,
+        title=t.title,
+        category=t.category,
+        author=t.author,
+        pinned=t.pinned,
+        drug_name=t.drug_name,
+        disease_name=t.disease_name,
+        signal_key=t.signal_key,
+        reply_count=t.reply_count,
+        like_count=t.like_count,
+        created_at=t.created_at,
+        last_activity_at=t.last_activity_at,
+    )
+
+
+def _reply_out(r: DiscussionReply) -> ReplyOut:
+    return ReplyOut(
+        id=r.id,
+        thread_id=r.thread_id,
+        body=r.body,
+        author=r.author,
+        like_count=r.like_count,
+        created_at=r.created_at,
+    )
+
+
+@app.get("/discussions", response_model=ThreadListOut)
+def list_discussions(
+    q: str = Query(default=""),
+    category: str = Query(default=""),
+    drug: str = Query(default=""),
+    disease: str = Query(default=""),
+    signal_key: str = Query(default=""),
+    sort: str = Query(default="newest"),  # newest | active | discussed
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> ThreadListOut:
+    """List discussion threads with optional search, category/context filters,
+    sort order, and pagination. Pinned threads always surface first within
+    each page."""
+    init_db()
+    session = SessionLocal()
+    try:
+        query_obj = session.query(DiscussionThread)
+
+        if q.strip():
+            like = f"%{q.strip().lower()}%"
+            query_obj = query_obj.filter(
+                DiscussionThread.title.ilike(like)
+                | DiscussionThread.body.ilike(like)
+                | DiscussionThread.author.ilike(like)
+            )
+        if category.strip():
+            query_obj = query_obj.filter(DiscussionThread.category == category.strip())
+        if drug.strip():
+            query_obj = query_obj.filter(
+                DiscussionThread.drug_name.ilike(f"%{drug.strip()}%")
+            )
+        if disease.strip():
+            query_obj = query_obj.filter(
+                DiscussionThread.disease_name.ilike(f"%{disease.strip()}%")
+            )
+        if signal_key.strip():
+            query_obj = query_obj.filter(
+                DiscussionThread.signal_key == signal_key.strip()
+            )
+
+        total = query_obj.count()
+
+        if sort == "active":
+            query_obj = query_obj.order_by(
+                desc(DiscussionThread.pinned),
+                desc(DiscussionThread.last_activity_at),
+            )
+        elif sort == "discussed":
+            query_obj = query_obj.order_by(
+                desc(DiscussionThread.pinned),
+                desc(DiscussionThread.reply_count),
+                desc(DiscussionThread.last_activity_at),
+            )
+        else:  # newest
+            query_obj = query_obj.order_by(
+                desc(DiscussionThread.pinned),
+                desc(DiscussionThread.created_at),
+            )
+
+        threads = query_obj.offset(offset).limit(limit).all()
+        return ThreadListOut(
+            threads=[_thread_summary(t) for t in threads],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+    finally:
+        session.close()
+
+
+@app.get("/discussions/by-context", response_model=ThreadListOut)
+def discussions_by_context(
+    drug: str = Query(default=""),
+    disease: str = Query(default=""),
+    signal_key: str = Query(default=""),
+    limit: int = Query(default=10, ge=1, le=50),
+) -> ThreadListOut:
+    """Return threads contextually linked to a specific drug, disease, or
+    drug→disease signal — used by DrugExplorer and OpportunityCard to show
+    relevant community discussions inline."""
+    init_db()
+    session = SessionLocal()
+    try:
+        query_obj = session.query(DiscussionThread)
+        filters = []
+        if signal_key.strip():
+            filters.append(DiscussionThread.signal_key == signal_key.strip())
+        if drug.strip():
+            filters.append(DiscussionThread.drug_name.ilike(f"%{drug.strip()}%"))
+        if disease.strip():
+            filters.append(DiscussionThread.disease_name.ilike(f"%{disease.strip()}%"))
+
+        if not filters:
+            return ThreadListOut(threads=[], total=0, limit=limit, offset=0)
+
+        from sqlalchemy import or_
+        query_obj = query_obj.filter(or_(*filters))
+        total = query_obj.count()
+        threads = (
+            query_obj
+            .order_by(desc(DiscussionThread.last_activity_at))
+            .limit(limit)
+            .all()
+        )
+        return ThreadListOut(
+            threads=[_thread_summary(t) for t in threads],
+            total=total,
+            limit=limit,
+            offset=0,
+        )
+    finally:
+        session.close()
+
+
+@app.post("/discussions", response_model=ThreadOut)
+def create_discussion(payload: ThreadCreate) -> ThreadOut:
+    """Create a new discussion thread. Context fields (drug_name, disease_name,
+    signal_key) are optional — set them when creating from drug/signal pages."""
+    init_db()
+    session = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        thread = DiscussionThread(
+            title=payload.title.strip(),
+            category=payload.category,
+            body=payload.body.strip(),
+            author=payload.author.strip(),
+            drug_name=payload.drug_name.strip() if payload.drug_name else None,
+            disease_name=payload.disease_name.strip() if payload.disease_name else None,
+            signal_key=payload.signal_key.strip() if payload.signal_key else None,
+            reply_count=0,
+            like_count=0,
+            created_at=now,
+            last_activity_at=now,
+        )
+        session.add(thread)
+        session.commit()
+        session.refresh(thread)
+        return ThreadOut(
+            **_thread_summary(thread).model_dump(),
+            body=thread.body,
+            replies=[],
+        )
+    finally:
+        session.close()
+
+
+@app.get("/discussions/{thread_id}", response_model=ThreadOut)
+def get_discussion(thread_id: int) -> ThreadOut:
+    """Fetch a thread with its full body text and all replies."""
+    init_db()
+    session = SessionLocal()
+    try:
+        thread = session.get(DiscussionThread, thread_id)
+        if thread is None:
+            raise HTTPException(status_code=404, detail=f"Thread {thread_id} not found")
+        replies = (
+            session.query(DiscussionReply)
+            .filter(DiscussionReply.thread_id == thread_id)
+            .order_by(DiscussionReply.created_at)
+            .all()
+        )
+        return ThreadOut(
+            **_thread_summary(thread).model_dump(),
+            body=thread.body,
+            replies=[_reply_out(r) for r in replies],
+        )
+    finally:
+        session.close()
+
+
+@app.post("/discussions/{thread_id}/replies", response_model=ReplyOut)
+def post_reply(thread_id: int, payload: ReplyCreate) -> ReplyOut:
+    """Add a reply to an existing discussion thread. Updates the thread's
+    reply_count and last_activity_at denormalized fields."""
+    init_db()
+    session = SessionLocal()
+    try:
+        thread = session.get(DiscussionThread, thread_id)
+        if thread is None:
+            raise HTTPException(status_code=404, detail=f"Thread {thread_id} not found")
+        now = datetime.now(timezone.utc)
+        reply = DiscussionReply(
+            thread_id=thread_id,
+            body=payload.body.strip(),
+            author=payload.author.strip(),
+            like_count=0,
+            created_at=now,
+        )
+        session.add(reply)
+        thread.reply_count = (thread.reply_count or 0) + 1
+        thread.last_activity_at = now
+        session.commit()
+        session.refresh(reply)
+        return _reply_out(reply)
+    finally:
+        session.close()
+
+
+@app.post("/discussions/{thread_id}/like", response_model=LikeOut)
+def like_thread(thread_id: int, author: str = Query(min_length=1)) -> LikeOut:
+    """Toggle a like on a discussion thread. Idempotent — calling twice for
+    the same (thread, author) pair removes the like (unlike)."""
+    init_db()
+    session = SessionLocal()
+    try:
+        thread = session.get(DiscussionThread, thread_id)
+        if thread is None:
+            raise HTTPException(status_code=404, detail=f"Thread {thread_id} not found")
+        existing = (
+            session.query(DiscussionLike)
+            .filter(
+                DiscussionLike.target_type == "thread",
+                DiscussionLike.target_id == thread_id,
+                DiscussionLike.author == author,
+            )
+            .first()
+        )
+        if existing:
+            session.delete(existing)
+            thread.like_count = max(0, (thread.like_count or 1) - 1)
+            liked = False
+        else:
+            session.add(
+                DiscussionLike(
+                    target_type="thread",
+                    target_id=thread_id,
+                    author=author,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+            thread.like_count = (thread.like_count or 0) + 1
+            liked = True
+        session.commit()
+        session.refresh(thread)
+        return LikeOut(target_type="thread", target_id=thread_id, liked=liked, new_count=thread.like_count)
+    finally:
+        session.close()
+
+
+@app.post("/discussions/replies/{reply_id}/like", response_model=LikeOut)
+def like_reply(reply_id: int, author: str = Query(min_length=1)) -> LikeOut:
+    """Toggle a like on a reply. Same toggle semantics as like_thread."""
+    init_db()
+    session = SessionLocal()
+    try:
+        reply = session.get(DiscussionReply, reply_id)
+        if reply is None:
+            raise HTTPException(status_code=404, detail=f"Reply {reply_id} not found")
+        existing = (
+            session.query(DiscussionLike)
+            .filter(
+                DiscussionLike.target_type == "reply",
+                DiscussionLike.target_id == reply_id,
+                DiscussionLike.author == author,
+            )
+            .first()
+        )
+        if existing:
+            session.delete(existing)
+            reply.like_count = max(0, (reply.like_count or 1) - 1)
+            liked = False
+        else:
+            session.add(
+                DiscussionLike(
+                    target_type="reply",
+                    target_id=reply_id,
+                    author=author,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+            reply.like_count = (reply.like_count or 0) + 1
+            liked = True
+        session.commit()
+        session.refresh(reply)
+        return LikeOut(target_type="reply", target_id=reply_id, liked=liked, new_count=reply.like_count)
     finally:
         session.close()

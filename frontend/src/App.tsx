@@ -3,6 +3,8 @@ import Sidebar from "./components/Sidebar";
 import CaseDetail from "./pages/CaseDetail";
 import CasesList from "./pages/CasesList";
 import Dashboard from "./pages/Dashboard";
+import DiscussionList from "./pages/DiscussionList";
+import DiscussionThread from "./pages/DiscussionThread";
 import DrugExplorer from "./pages/DrugExplorer";
 import EvidenceExplorer from "./pages/EvidenceExplorer";
 import NewCase from "./pages/NewCase";
@@ -21,6 +23,8 @@ function routeLabel(path: string): string {
   if (path === "/drugs") return "Drug Intelligence";
   if (path === "/signals") return "Research Signals";
   if (path === "/profile") return "Scholar Profile";
+  if (path === "/discussions") return "Research Community";
+  if (path.startsWith("/discussions/")) return "Discussion Thread";
   return "Clinical Intelligence";
 }
 
@@ -41,6 +45,26 @@ function renderRoute(path: string) {
   if (drugMatch) return <DrugExplorer initialDrug={drugMatch.name} />;
   if (path === "/signals") return <ResearchSignals />;
   if (path === "/profile") return <ScholarProfilePage />;
+
+  // --- Discussion routes ---
+  if (path === "/discussions") {
+    // Parse optional context query params from hash (e.g. #/discussions?drug=X)
+    const hashWithQuery = window.location.hash.replace(/^#/, "");
+    const qIdx = hashWithQuery.indexOf("?");
+    const params = qIdx >= 0 ? new URLSearchParams(hashWithQuery.slice(qIdx + 1)) : new URLSearchParams();
+    return (
+      <DiscussionList
+        initialDrug={params.get("drug") ?? undefined}
+        initialDisease={params.get("disease") ?? undefined}
+        initialSignalKey={params.get("signal_key") ?? undefined}
+      />
+    );
+  }
+  const discussionMatch = matchRoute("/discussions/:id", path);
+  if (discussionMatch) {
+    const id = Number(discussionMatch.id);
+    if (Number.isFinite(id)) return <DiscussionThread threadId={id} />;
+  }
 
   return <Dashboard />;
 }

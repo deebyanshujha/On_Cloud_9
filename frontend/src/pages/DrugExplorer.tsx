@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchSignals, searchMedications, type Signal } from "../api";
+import { fetchSignals, getDiscussionsByContext, searchMedications, type Signal, type ThreadSummary } from "../api";
 import AutocompleteInput from "../components/AutocompleteInput";
 import { navigate } from "../router";
 import { scoreTier, SCORE_TIER_LABEL } from "../scoring";
@@ -72,6 +72,15 @@ export default function DrugExplorer({ initialDrug }: Props) {
 
   const selectedDrug = filtered.find((d) => d.drug === selected) ?? drugs.find((d) => d.drug === selected) ?? null;
 
+  // Community threads for the selected drug
+  const [drugThreads, setDrugThreads] = useState<ThreadSummary[]>([]);
+  useEffect(() => {
+    if (!selectedDrug) { setDrugThreads([]); return; }
+    getDiscussionsByContext({ drug: selectedDrug.drug, limit: 5 })
+      .then((res) => setDrugThreads(res.threads))
+      .catch(() => setDrugThreads([]));
+  }, [selectedDrug?.drug]);
+
   return (
     <div className="page">
       <div className="page-head">
@@ -134,6 +143,51 @@ export default function DrugExplorer({ initialDrug }: Props) {
                     <div className="approved-text">{selectedDrug.approvedFor.join(" / ")}</div>
                   </>
                 )}
+
+                {/* Community discussions for this drug */}
+                <div className="disc-drug-community-section">
+                  <div className="detail-section-label disc-drug-community-label">
+                    Community Discussions
+                    <button
+                      className="disc-view-all-btn"
+                      onClick={() => {
+                        const p = new URLSearchParams({ drug: selectedDrug.drug });
+                        navigate(`/discussions?${p.toString()}`);
+                      }}
+                    >
+                      View all →
+                    </button>
+                  </div>
+                  {drugThreads.length === 0 ? (
+                    <div className="disc-drug-community-empty">
+                      <span>No discussions yet for <strong>{selectedDrug.drug}</strong>.</span>
+                      <button
+                        className="disc-discuss-btn disc-discuss-btn-sm"
+                        onClick={() => {
+                          const p = new URLSearchParams({ drug: selectedDrug.drug });
+                          navigate(`/discussions?${p.toString()}`);
+                        }}
+                      >
+                        💬 Start a discussion
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="disc-drug-thread-list">
+                      {drugThreads.map((t) => (
+                        <button
+                          key={t.id}
+                          className="disc-drug-thread-row"
+                          onClick={() => navigate(`/discussions/${t.id}`)}
+                        >
+                          <span className="disc-drug-thread-title">{t.title}</span>
+                          <span className="disc-drug-thread-meta mono">
+                            {t.reply_count} replies · {t.author}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </div>

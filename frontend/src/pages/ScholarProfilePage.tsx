@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
 import { useAuth } from "../auth";
 import { navigate } from "../router";
 import "../styles/ProfilePage.css";

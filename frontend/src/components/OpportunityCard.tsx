@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Signal } from "../api";
 import { scoreTier, SOURCE_LABELS } from "../scoring";
 import { SignalScoreBreakdown } from "./ScoreBreakdown";
+import { navigate } from "../router";
 
 interface Props {
   signal: Signal;
@@ -132,6 +133,24 @@ export default function OpportunityCard({ signal }: Props) {
                 </a>
               ))}
             </div>
+          </div>
+
+          {/* Context-aware community link */}
+          <div className="disc-opp-discuss-row">
+            <button
+              className="disc-discuss-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                const params = new URLSearchParams({
+                  drug: signal.drug,
+                  disease: signal.disease,
+                });
+                navigate(`/discussions?${params.toString()}`);
+              }}
+            >
+              <span className="disc-discuss-icon">💬</span>
+              Discuss this signal in the community
+            </button>
           </div>
         </div>
       )}

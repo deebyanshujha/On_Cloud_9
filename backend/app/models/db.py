@@ -29,6 +29,7 @@ def init_db() -> None:
     from app.models import (  # noqa: F401  (registers the tables)
         approved_indication,
         case,
+        discussion,
         document,
         ingestion_status,
         known_drug,

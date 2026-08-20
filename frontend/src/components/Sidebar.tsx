@@ -12,8 +12,9 @@ const NAV_ITEMS: NavItem[] = [
   { path: "/", label: "Dashboard", match: (p) => p === "/" },
   { path: "/cases", label: "Cases", match: (p) => p === "/cases" || p.startsWith("/cases/") },
   { path: "/evidence", label: "Evidence Explorer", match: (p) => p === "/evidence" },
-  { path: "/drugs", label: "Drug Intelligence", match: (p) => p === "/drugs" },
+  { path: "/drugs", label: "Drug Intelligence", match: (p) => p === "/drugs" || p.startsWith("/drugs/") },
   { path: "/signals", label: "Research Radar", match: (p) => p === "/signals" },
+  { path: "/discussions", label: "Community", match: (p) => p === "/discussions" || p.startsWith("/discussions/") },
 ];
 
 const SCHOLAR_NAV_ITEMS: NavItem[] = [
