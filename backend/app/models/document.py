@@ -31,4 +31,5 @@ class DocumentRecord(Base):
     date: Mapped[date_ | None] = mapped_column(Date, nullable=True)
     url: Mapped[str | None] = mapped_column(String, nullable=True)
     num_mentions: Mapped[int] = mapped_column(Integer, default=1)
+    evidence_type: Mapped[str | None] = mapped_column(String, nullable=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

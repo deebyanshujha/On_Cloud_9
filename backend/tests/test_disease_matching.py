@@ -8,6 +8,7 @@ from app.core.disease_matching import (
     disease_tokens,
     is_junk_condition,
     is_too_generic_to_match,
+    strip_punctuation_variants,
 )
 
 # Real ClinicalTrials.gov condition text pulled in Step 3.
@@ -81,6 +82,80 @@ def test_match_is_not_required_in_reverse():
     # term) is not required and not checked.
     assert diseases_match("type 2 diabetes mellitus", REAL_METFORMIN_LABEL_TEXT)
     assert not diseases_match(REAL_METFORMIN_LABEL_TEXT, "type 2 diabetes mellitus")
+
+
+# --- apostrophe/punctuation-variant normalization (Case #17 regression) --
+#
+# Real bug: Case #17 (Alzheimer's Disease + Metformin) retrieved 60 real
+# Europe PMC/PubMed papers about Alzheimer's disease, but 0 survived
+# relevance filtering. Root cause: `_WORD_RE` (`[a-z0-9]+`) treats an
+# apostrophe as a token boundary, so "Alzheimer's disease" tokenized to
+# {"alzheimer", "s", "disease"} while the case's stored condition
+# "alzheimers disease" (no apostrophe) tokenized to {"alzheimers",
+# "disease"} — "alzheimers" (one token) never equals "alzheimer" + "s"
+# (two tokens), so diseases_match returned False for genuinely matching
+# text. Fixed by deleting apostrophe-family characters before tokenizing
+# (strip_punctuation_variants), so every spelling collapses to the same
+# token set.
+
+REAL_ALZHEIMERS_ABSTRACT_TEXT = (
+    "Alzheimer's disease is a progressive neurodegenerative disorder and "
+    "the most common cause of dementia in older adults."
+)
+
+
+def test_alzheimers_disease_matches_apostrophe_form_no_apostrophe_form():
+    assert diseases_match("alzheimers disease", REAL_ALZHEIMERS_ABSTRACT_TEXT)
+    assert diseases_match("Alzheimers Disease", REAL_ALZHEIMERS_ABSTRACT_TEXT)
+
+
+def test_alzheimers_disease_matches_straight_and_curly_apostrophes():
+    straight = "Alzheimer's disease"
+    curly = "Alzheimer’s disease"  # ’
+    assert diseases_match(straight, curly)
+    assert diseases_match(curly, straight)
+    assert diseases_match("alzheimers disease", curly)
+    assert diseases_match("alzheimers disease", straight)
+
+
+def test_apostrophe_normalization_is_generic_not_hardcoded_to_alzheimers():
+    # Same class of possessive disease name, different disease entirely —
+    # the fix must not be a special case for "Alzheimer's" specifically.
+    assert diseases_match("parkinsons disease", "Parkinson's disease is a movement disorder.")
+    assert diseases_match("crohns disease", "Crohn’s disease causes intestinal inflammation.")
+    assert diseases_match("graves disease", "Graves' disease is an autoimmune thyroid condition.")
+
+
+def test_apostrophe_normalization_does_not_create_false_positive_matches():
+    # Stripping apostrophes must not make genuinely different diseases
+    # match each other.
+    assert not diseases_match("alzheimers disease", "Parkinson's disease is a movement disorder.")
+    assert not diseases_match("parkinsons disease", REAL_ALZHEIMERS_ABSTRACT_TEXT)
+
+
+def test_apostrophe_normalization_does_not_merge_unrelated_hyphenated_terms():
+    # Only apostrophe-family characters are stripped — hyphens and other
+    # punctuation still tokenize exactly as before, so this fix can't
+    # accidentally widen matching beyond possessive-name variants.
+    assert not diseases_match(
+        "non-small cell lung cancer", "small cell lung cancer is a distinct, more aggressive subtype."
+    )
+
+
+def test_strip_punctuation_variants_only_touches_apostrophe_characters():
+    assert strip_punctuation_variants("Alzheimer's disease") == "Alzheimers disease"
+    assert strip_punctuation_variants("Alzheimer’s disease") == "Alzheimers disease"
+    assert strip_punctuation_variants("non-small cell lung cancer") == "non-small cell lung cancer"
+    assert strip_punctuation_variants("Stage IV Pancreatic Cancer") == "Stage IV Pancreatic Cancer"
+
+
+def test_existing_staging_and_pah_cases_still_pass_after_apostrophe_fix():
+    # Preserve pre-existing behavior: this fix must not regress the two
+    # real cases the matcher was originally built for.
+    assert diseases_match(REAL_PANCREATIC_CANCER_CONDITION, "pancreatic cancer")
+    assert diseases_match("pulmonary hypertension", REAL_SILDENAFIL_PAH_LABEL_TEXT)
+    assert not diseases_match("erectile dysfunction", REAL_SILDENAFIL_PAH_LABEL_TEXT)
+    assert not diseases_match("pancreatic cancer", REAL_METFORMIN_LABEL_TEXT)
 
 
 # --- is_junk_condition -------------------------------------------------

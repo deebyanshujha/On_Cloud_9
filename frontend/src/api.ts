@@ -4,6 +4,7 @@ export interface SourceLink {
   url: string | null;
   date: string | null;
   phase: string | null;
+  evidence_type?: string | null;
 }
 
 export interface Signal {
@@ -74,6 +75,7 @@ export interface CurrentMedicationInteractionNote {
 
 export interface CandidateOut {
   drug: string;
+  disease?: string;
   research_priority_score: number;
   evidence_strength_score: number;
   known_indications: string[];
@@ -102,6 +104,56 @@ export interface AnalysisResult {
   primary_condition: string;
   analyzed_at: string;
   candidates: CandidateOut[];
+  research_metadata?: ResearchMetadata;
+}
+
+export interface RejectedDrug {
+  raw_name: string;
+  normalized_name: string | null;
+  reason: string;
+  source: string | null;
+}
+
+export interface RejectedRelationship {
+  drug: string | null;
+  disease: string | null;
+  source: string;
+  source_id: string;
+  evidence_type: string;
+  reason: string;
+}
+
+export interface SourceAttempt {
+  source: string;
+  status:
+    | "success"
+    | "no_results"
+    | "timeout"
+    | "http_error"
+    | "parse_error"
+    | "rate_limited"
+    | "not_attempted";
+  results_found: number;
+  queries_attempted: number;
+  error: string | null;
+}
+
+export interface ResearchMetadata {
+  queries: string[];
+  broadened_queries: string[];
+  papers_retrieved: number;
+  trials_retrieved: number;
+  valid_drugs: string[];
+  normalized_drugs: string[];
+  rejected_drugs: RejectedDrug[];
+  valid_drug_disease_relationships: number;
+  rejected_relationships: RejectedRelationship[];
+  candidate_count: number;
+  evidence_gaps: string[];
+  source_counts: Record<string, number>;
+  source_statuses: SourceAttempt[];
+  used_local_fallback: boolean;
+  local_fallback_reason: string | null;
 }
 
 // --- TheraLens: evidence re-check (Phase 3) ---------------------------------
@@ -127,6 +179,11 @@ export interface EvidenceCheckResult {
   checked_at: string;
   has_new_evidence: boolean;
   changes: CandidateChange[];
+  new_papers: string[];
+  new_trials: string[];
+  changed_evidence: string[];
+  new_candidates: string[];
+  removed_invalidated_candidates: string[];
   message: string;
 }
 

@@ -24,31 +24,46 @@ from app.schemas.document import ApprovedIndication, Document, Signal
 # the total is clipped to [0, 1].
 
 SOURCE_WEIGHT = {
-    "clinicaltrials": 0.40,
-    "biorxiv": 0.25,
-    "medrxiv": 0.25,
-    "manual": 0.30,
+    "clinicaltrials": 0.12,
+    "pubmed": 0.10,
+    "europepmc": 0.10,
+    "medrxiv": 0.10,
+    "biorxiv": 0.06,
+    "manual": 0.08,
+}
+
+EVIDENCE_TYPE_WEIGHT = {
+    "RANDOMIZED_TRIAL": 0.18,
+    "CLINICAL_TRIAL": 0.14,
+    "META_ANALYSIS": 0.18,
+    "SYSTEMATIC_REVIEW": 0.16,
+    "HUMAN_STUDY": 0.12,
+    "OBSERVATIONAL": 0.12,
+    "PRECLINICAL": 0.05,
+    "MECHANISTIC": 0.04,
+    "CASE_REPORT": 0.03,
+    "MENTION_ONLY": 0.0,
 }
 
 PHASE_WEIGHT = {
-    "phase 4": 0.35,
-    "phase 3": 0.30,
-    "phase 2": 0.20,
-    "phase 1": 0.10,
-    "early phase 1": 0.05,
-    "not applicable": 0.05,
+    "phase 4": 0.10,
+    "phase 3": 0.10,
+    "phase 2": 0.08,
+    "phase 1": 0.04,
+    "early phase 1": 0.03,
+    "not applicable": 0.02,
 }
-DEFAULT_PHASE_WEIGHT = 0.05
+DEFAULT_PHASE_WEIGHT = 0.02
 
-MENTION_WEIGHT_PER_DOC = 0.10
-MENTION_WEIGHT_CAP = 0.30
+MENTION_WEIGHT_PER_DOC = 0.08
+MENTION_WEIGHT_CAP = 0.28
 
 RECENCY_BUCKETS = (
-    (365, 0.20),      # <= 1 year old
-    (365 * 3, 0.12),  # <= 3 years old
-    (365 * 5, 0.06),  # <= 5 years old
+    (365, 0.07),      # <= 1 year old
+    (365 * 3, 0.04),  # <= 3 years old
+    (365 * 5, 0.02),  # <= 5 years old
 )
-RECENCY_WEIGHT_STALE = 0.02
+RECENCY_WEIGHT_STALE = 0.01
 
 
 def normalize(text: str) -> str:
@@ -72,7 +87,11 @@ def _phase_weight(phase: str | None) -> float:
 
 
 def _best_source_weight(docs: list[Document]) -> float:
-    return max(SOURCE_WEIGHT.get(d.source, 0.2) for d in docs)
+    return max(SOURCE_WEIGHT.get(d.source, 0.08) for d in docs)
+
+
+def _best_evidence_type_weight(docs: list[Document]) -> float:
+    return max(EVIDENCE_TYPE_WEIGHT.get(d.evidence_type or "", 0.08) for d in docs)
 
 
 def _best_phase_weight(docs: list[Document]) -> float:
@@ -145,6 +164,8 @@ def group_documents_by_pair(
     documents."""
     groups: dict[tuple[str, str], list[Document]] = defaultdict(list)
     for doc in apply_fair_document_cap(documents):
+        if doc.evidence_type == "MENTION_ONLY":
+            continue
         if is_junk_condition(doc.disease):
             continue
         key = (doc.normalized_drug(), doc.normalized_disease())
@@ -154,15 +175,21 @@ def group_documents_by_pair(
 
 def score_pair(docs: list[Document], today: date) -> tuple[float, list[str]]:
     source_w = _best_source_weight(docs)
+    evidence_type_w = _best_evidence_type_weight(docs)
     phase_w = _best_phase_weight(docs)
     recency_w = _most_recent_weight(docs, today)
     mention_w = _mention_weight(docs)
 
-    total = round(min(source_w + phase_w + recency_w + mention_w, 1.0), 3)
+    total = round(min(source_w + evidence_type_w + phase_w + recency_w + mention_w, 1.0), 3)
 
     reasons = []
-    best_source = max(docs, key=lambda d: SOURCE_WEIGHT.get(d.source, 0.2)).source
+    best_source = max(docs, key=lambda d: SOURCE_WEIGHT.get(d.source, 0.08)).source
     reasons.append(f"source: {best_source}")
+    best_evidence_doc = max(
+        docs, key=lambda d: EVIDENCE_TYPE_WEIGHT.get(d.evidence_type or "", 0.08)
+    )
+    if best_evidence_doc.evidence_type:
+        reasons.append(f"evidence type: {best_evidence_doc.evidence_type.lower()}")
     best_phase_doc = max(docs, key=lambda d: _phase_weight(d.phase))
     if best_phase_doc.phase:
         reasons.append(f"trial phase: {best_phase_doc.phase}")

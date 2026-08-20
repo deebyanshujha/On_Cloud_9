@@ -23,6 +23,7 @@ from app.models.case import (
     CaseConditionRecord,
     CaseEvidenceCheckRecord,
     CaseMedicationRecord,
+    CaseResearchEvidenceRecord,
     CaseRecord,
     CaseSnapshotRecord,
 )
@@ -60,6 +61,7 @@ def upsert_documents(session: Session, documents: list[Document]) -> tuple[int, 
                 date=doc.date,
                 url=doc.url,
                 num_mentions=doc.num_mentions,
+                evidence_type=doc.evidence_type,
             )
         )
         inserted += 1
@@ -80,6 +82,7 @@ def load_all_documents(session: Session) -> list[Document]:
             date=r.date,
             url=r.url,
             num_mentions=r.num_mentions,
+            evidence_type=r.evidence_type,
         )
         for r in records
     ]
@@ -381,6 +384,55 @@ def load_evidence_check(session: Session, case_id: int) -> CaseEvidenceCheckReco
     return session.execute(
         select(CaseEvidenceCheckRecord).where(CaseEvidenceCheckRecord.case_id == case_id)
     ).scalar_one_or_none()
+
+
+def save_case_research_evidence(
+    session: Session,
+    *,
+    case_id: int,
+    query: str,
+    source: str,
+    source_id: str,
+    url: str | None,
+    title: str | None,
+    date,
+    normalized_drugs: list[str],
+    normalized_diseases: list[str],
+    relationships: list[dict],
+) -> None:
+    """Append one case-specific runtime-research cache row.
+
+    Rows are append-only: a refresh should preserve what the earlier run
+    saw so the caller can compare previous vs. newly retrieved evidence.
+    The runtime engine dedupes per run before it calls this function; the
+    cache keeps query provenance even if two different queries return the
+    same source later.
+    """
+    session.add(
+        CaseResearchEvidenceRecord(
+            case_id=case_id,
+            query=query,
+            source=source,
+            source_id=source_id,
+            url=url,
+            title=title,
+            date=date,
+            normalized_drugs=json.dumps(normalized_drugs),
+            normalized_diseases=json.dumps(normalized_diseases),
+            relationships_json=json.dumps(relationships),
+        )
+    )
+    session.commit()
+
+
+def load_case_research_evidence(session: Session, case_id: int) -> list[CaseResearchEvidenceRecord]:
+    return list(
+        session.execute(
+            select(CaseResearchEvidenceRecord).where(
+                CaseResearchEvidenceRecord.case_id == case_id
+            )
+        ).scalars().all()
+    )
 
 
 def load_all_approved_indications(session: Session) -> list[ApprovedIndication]:

@@ -2130,3 +2130,454 @@ Data-quality gaps Phase A already flagged as deliberately not deleted
 entries, short abbreviations like `"ad"`/`"ai"`) still surface in Drug
 Intelligence's browse list — out of scope for a frontend phase, flagged
 here as a visible symptom of that already-documented backend limitation.
+
+## Runtime case research — verification + fixes (2026-08-20)
+
+A prior session (interrupted by usage limit) had already built
+`app/core/runtime_research.py` (case-specific live research: Europe PMC +
+ClinicalTrials.gov + openFDA, query generation, drug validation via RxNorm,
+mention-only rejection, known-vs-emerging filtering, case evidence cache)
+and wired it into `POST /cases/{id}/analyze` and the recheck endpoint. This
+session's job was to verify that work against real data rather than trust
+it, not to redo it — most of it turned out to be correct; three real bugs
+and one hang were found and fixed.
+
+**What was verified as already correct** (by reading the code, not just
+skimming): query generation is genuinely case-derived (no hardcoded
+diabetes/metformin/heart-failure strings — confirmed with a test asserting
+the product-brief example terms never leak into an unrelated case's
+queries); `run_comparison` (pre-existing, reused unmodified) already drops
+`MENTION_ONLY` documents and already-approved drug-disease pairs before
+scoring, so known-vs-emerging and co-occurrence-isn't-evidence were both
+correctly enforced end to end, not just recorded in metadata; scoring
+requires multiple weighted factors (source, evidence type, phase, recency,
+independent-mention count) so a single weak source cannot reach the "high"
+tier; no-signal cases return `candidate_count: 0` with real
+`papers_retrieved`/`trials_retrieved`/`evidence_gaps` instead of falling
+back to unrelated global signals; source failures are caught per-source
+(`httpx.HTTPError`) and recorded in `evidence_gaps`, never fabricated.
+
+**Bug 1 — test suite was hanging, not passing.** `tests/test_case_api.py`
+called `POST /cases/{id}/analyze` in ~15 tests with no mock for the new
+runtime-research call, so every one of them was making real Europe PMC/
+ClinicalTrials.gov network requests — `pytest -q` timed out at 2 minutes
+instead of finishing. Fixed by monkeypatching `main.run_runtime_case_research`
+to a fast no-network stub in the `client` fixture (falls back to
+locally-seeded documents/approved-indications, same as the real "no live
+evidence found" path) — full suite now runs in ~9s. Added
+`tests/test_runtime_research.py` (13 tests) to cover the module directly
+with mocked HTTP: query generation, mention-only vs. therapeutic-language
+classification, drug validation (junk rejection, RxNorm-unresolved
+rejection, accepted resolution), trial-intervention junk rejection even
+when CT.gov tags it type `DRUG`, and the no-signal / source-failure paths.
+Backend: **200 passing** (187 existing + 13 new), 0 failing.
+
+**Bug 2 — "placebo" was leaking through as a candidate drug.** Live-tested
+with the exact product-brief case (Type 2 Diabetes + Heart Failure +
+Metformin) and found `placebo -> diabetes mellitus, type 2` and
+`placebo -> heart failure` in the actual candidate output, despite
+`is_junk_drug_name` already listing bare `"placebo"` as junk. Root cause:
+CT.gov intervention names like `"Placebo Injection"` or `"Placebo tablet"`
+aren't an exact match against the junk list (so `is_junk_drug_name(raw)`
+passes), but `normalize_drug_name` then strips `"injection"`/`"tablet"` as
+salt/form words, leaving the canonical name `"placebo"` — and RxNorm
+genuinely has an RxCUI for `"Placebo"` (RxCUI 8375, confirmed live), so the
+authoritative-resolution gate that's supposed to reject junk was instead
+*validating* it. Fixed two ways: (1) `_validate_drug` in
+`runtime_research.py` now also runs `is_junk_drug_name` on the
+post-normalization canonical name, not just the raw name; (2)
+`is_junk_drug_name` in `drug_normalization.py` gained a whole-word token
+check (`_JUNK_TOKENS = {"placebo", "sham"}`) so `"Placebo (subcutaneous)"`,
+`"Matching Placebo Injection"`, `"Sham Procedure Device"`, etc. are all
+caught regardless of surrounding words — no real drug name legitimately
+contains either token. Re-verified live: `placebo` no longer appears
+anywhere in `research_metadata.valid_drugs` or the candidate list.
+
+**Bug 3 — dose-variant strings weren't collapsing to one canonical drug.**
+Same live case surfaced `ertugliflozin 5 mg` and `ertugliflozin 15 mg` as
+two separate candidates (and separately, `sitagliptin 100 mg`). Cause:
+`_STRENGTH_RE` only matched a strength expressed as one token
+(`"500mg"`), not CT.gov's common two-token form (`"5"`, `"mg"` as separate
+words after splitting), so `"Ertugliflozin 5 mg"` normalized to
+`"ertugliflozin 5 mg"` instead of `"ertugliflozin"`. Fixed by adding
+`_STRENGTH_INLINE_RE` (matches the same `\d+(\.\d+)?\s*(mg|mcg|g|ml|iu|
+units?)` pattern inline against the whole string, space-tolerant, before
+tokenizing) run ahead of the existing per-token check. Re-verified live:
+dose variants now collapse into one `ertugliflozin`/`sitagliptin`/etc.
+candidate; total candidate count for the test case dropped from 10
+(hitting `MAX_CANDIDATES_PER_CASE`) to 6 real distinct drugs — fewer,
+correctly deduped signals, not a truncation artifact.
+
+**Performance — case runs were unusably slow before this session's fix,
+still slow after.** First live run of the Diabetes+Heart-Failure+Metformin
+case (12 generated queries × Europe PMC + ClinicalTrials.gov, then ~15-20
+sequential openFDA label lookups) took **190s**. Both loops were
+sequential-only in the prior session's code. Parallelized with
+`concurrent.futures.ThreadPoolExecutor` (max 8 workers): (1) all
+per-query Europe PMC/ClinicalTrials.gov fetches now run concurrently
+(parsing/dedup/RxNorm-resolution stays single-threaded afterward, in
+original query order, so output is identical to the sequential version,
+just gathered faster); (2) all per-drug openFDA label lookups now run
+concurrently (embarrassingly parallel — no shared state between drugs; DB
+writes still happen sequentially afterward since `Session` isn't
+thread-safe). Re-verified live: same case, same result shape, **73s cold /
+12-61s warm** (RxNorm's `resolve_rxnorm_id` is `@lru_cache`d at module
+scope, so a second case run against overlapping drug names is faster).
+Still not instant — a case run is still bounded by ~20-30 real outbound
+HTTP calls to third-party APIs — but roughly 2.6-15x faster than the
+unparalleled version, and this is flagged as a known remaining rough edge
+below, not silently accepted as fine.
+
+**Global data cleanup (requirement: don't blindly delete, clean at the
+right layer).** `scripts/clean_junk_medications.py` (built in an earlier
+phase, per its own docstring) already exists specifically for this and
+uses a deliberately conservative deletion criterion (`is_junk_drug_name`
+only, never a failed RxNorm lookup alone, since RxNorm not recognizing a
+name is ambiguous — could be a real unlisted trial-stage compound).
+Re-ran it in dry-run mode this session: **0 junk documents/known-drugs/
+case-medications found** — the noisy examples named in this session's
+brief (Toradol/Oxycodone → Surgery, 5-ASA → Ulcerative Colitis, "Dose
+Reduction of Lezertinib" as a drug name) are either already cleaned from
+`arbitrage.db` by that script's earlier `--apply` run, or (for the
+RxNorm-unresolved-but-not-obviously-junk names like `"lezertinib"` itself,
+`"bifidobacterium animalis subsp lactis"`) intentionally left in place per
+the script's own documented reasoning — informational-only, not deleted,
+since deleting on RxNorm-miss alone risks purging real compounds RxNorm
+simply doesn't catalog yet. No further action taken here; the tool at the
+correct layer already exists and was confirmed still doing its job.
+
+**Live end-to-end result, Type 2 Diabetes + Heart Failure + Metformin**
+(after all three bug fixes above): 38 papers / 13 trials retrieved, 13
+valid drugs after validation, 6 final candidates — `metformin`,
+`empagliflozin`, `insulin`, `somatotropin`, `tirzepatide`, `semaglutide`,
+all `-> heart failure`, all backed by real PubMed/ClinicalTrials.gov IDs
+with real evidence types (`RANDOMIZED_TRIAL`, `META_ANALYSIS`,
+`MECHANISTIC`, `OBSERVATIONAL`, etc.), all moderate tier (0.4-0.65
+evidence-strength — correctly nowhere near "high" off one source).
+`dapagliflozin -> heart failure` and `empagliflozin -> heart failure` were
+correctly *excluded* as **known, not emerging**, indications — both SGLT2
+inhibitors have real FDA heart-failure label approvals, and the pipeline's
+openFDA-backed known-vs-emerging check caught that correctly rather than
+flagging an already-approved use as a new signal. `metformin -> type 2
+diabetes` was correctly excluded the same way (metformin's own original
+approval). Separately ran an obscure-condition case (Fabry Disease, no
+comorbidities/medications) to check the no-signal path: 0 papers / 1 trial
+retrieved, 1 valid drug (`migalastat`), **0 candidates**, honest
+`evidence_gaps` explaining why — no fallback to unrelated global signals.
+
+**Frontend:** `frontend/src/api.ts`/`scoring.ts` changes reviewed — purely
+additive TypeScript types (`ResearchMetadata`, `RejectedDrug`,
+`RejectedRelationship`, new `EvidenceCheckResult` fields, two new
+`SOURCE_LABELS` entries) plus one optional field each on two existing
+interfaces. No component, layout, color, or navigation changes — `npm run
+build` passes cleanly.
+
+**Files changed this session:** `backend/app/core/runtime_research.py`
+(concurrent fetch, canonical-name junk re-check), `backend/app/core/
+drug_normalization.py` (`_JUNK_TOKENS`, `_STRENGTH_INLINE_RE`),
+`backend/tests/test_case_api.py` (hermetic `client` fixture),
+`backend/tests/test_runtime_research.py` (new, 13 tests).
+
+**Known remaining rough edges, flagged not fixed:**
+- A case run is still ~12-73s depending on cache warmth — acceptable for a
+  research tool, not instant. Further speedup would mean either caching
+  Europe PMC/CT.gov results per-query (not just per-drug RxNorm lookups)
+  or reducing `CASE_RESEARCH_RESULTS_PER_QUERY`/query count, both real
+  product tradeoffs (freshness/coverage vs. speed) not made unilaterally
+  here.
+- `save_case_research_evidence` commits once per record inside a loop
+  (potentially 50+ commits per case run) rather than batching into one
+  transaction — correctness is fine (it's append-only, no partial-write
+  risk that matters), just not the fastest possible write pattern. Not
+  touched this session since it wasn't the bottleneck (network I/O
+  dominates by roughly two orders of magnitude).
+- The `_JUNK_TOKENS` whole-word check added this session (`placebo`,
+  `sham`) is a small, hand-picked set, same spirit as every other
+  curated-list judgment call already documented throughout this file
+  (`JUNK_CONDITION_TERMS`, `STAGING_QUALIFIERS`, etc.) — extend it if
+  another CT.gov comparator-arm pattern is found to slip through the same
+  way placebo did.
+
+## Case #15 regression fix — local-fallback drug validation (2026-08-20)
+
+A real user-facing bug: Case #15's UI showed `Snp`/`Prs` as research
+candidates. Traced (not assumed) end to end: confirmed via raw
+`POST /cases/15/analyze` JSON that these came from the **backend**, not a
+frontend rendering artifact.
+
+**Root cause.** Case #15's `primary_condition` was a verbose
+ontology-style label (`"diabetes - type 2 (adult, non-insulin-
+independent)"`) that returned 0 live papers/trials this run. `app/main.py`
+then fell back to `documents = runtime.documents or local_documents` — the
+**entire, unfiltered** global discovery cache. `snp`/`prs` (single
+nucleotide polymorphism / polygenic risk score — genetics/statistics terms,
+not drugs) were sitting in `arbitrage.db`'s `documents` table because the
+*older* discovery pipeline's NER CHEMICAL-label extraction
+(`app/ingestion/biorxiv.py`) never validated extracted "drug" names against
+anything — that gate (`is_junk_drug_name` + RxNorm resolution) only ever
+existed on `runtime_research.py`'s own live-fetch path. `analyze_case`'s
+disease matcher legitimately matched the bare term `"diabetes"` against the
+case, and `run_comparison` has no drug-identity check at all — so the
+NER artifacts sailed through as "real" candidates.
+
+**Fix:** `filter_documents_by_valid_drug()` (new, in
+`runtime_research.py`) applies the same `is_valid_medication_entity`
+(RxNorm/allowlist) authoritative gate to the local-cache fallback that
+already existed for live-fetched documents — entity-based, not a
+hardcoded `snp`/`prs` reject list, so it closes the gap for any future NER
+artifact, not just the two seen. Wired into both `app/main.py` fallback
+call sites. **Case #15 candidates, before/after:** `snp -> diabetes`
+(0.35, low) + `prs -> diabetes` (0.35, low) → `[]` (honest — metformin's
+own local documents don't surface since metformin's approved indication
+*is* diabetes, so there's no repurposing signal for its own primary
+condition once the garbage is removed). Backend: 202/202 passing (200 +
+2 new regression tests in `tests/test_runtime_research.py`). Frontend:
+unaffected, builds clean (bug was entirely backend data, no frontend
+change needed).
+
+## Retrieval-layer audit and rebuild (2026-08-20)
+
+Investigating the Case #15 zero-live-results scenario surfaced a bigger
+question: was 0 papers/trials a genuine "no evidence" outcome, or was the
+retrieval layer itself broken? A full audit (not an assumption) of the
+Europe PMC / ClinicalTrials.gov / openFDA implementations followed,
+confirmed against the real live APIs before any code changed.
+
+### Root cause(s) found
+
+1. **Query construction was too restrictive** — confirmed live, not
+   assumed. `generate_case_queries` always wraps the case's free-text
+   fields in an exact quoted phrase. For a verbose ontology-style label
+   (`"diabetes - type 2 (adult, non-insulin-independent)"`), that exact
+   phrase never appears verbatim in any real abstract or trial listing:
+   ```
+   curl europepmc?query="diabetes - type 2 (adult, non-insulin-independent)" ...
+   -> hitCount: 0
+   curl europepmc?query=diabetes AND metformin ...
+   -> hitCount: 94407
+   ```
+   Same result confirmed against ClinicalTrials.gov's `query.term`. This
+   was never an API problem — Europe PMC and ClinicalTrials.gov both
+   responded correctly (HTTP 200) to a query that was simply too narrow.
+2. **A hardcoded term found during the audit**: `generate_case_queries`
+   had `add(f'"{comorbidity}" diabetes drug')` — literally the word
+   "diabetes" baked into every comorbidity query for every case,
+   regardless of the case's actual primary condition. The existing test
+   asserting "nothing hardcoded leaks in" missed it because it checked
+   case-sensitively (`"Diabetes" not in joined`) against a lowercase
+   literal. Fixed (now `f'"{comorbidity}" drug treatment'`) and the test
+   strengthened to check case-insensitively.
+3. **Every retrieval failure mode was collapsed into one undifferentiated
+   evidence_gaps string** — a genuine Europe PMC/ClinicalTrials.gov
+   outage, a timeout, a rate limit, and a clean "searched, found nothing"
+   were all indistinguishable from `research_metadata`. No retries, no
+   backoff, no rate-limit handling, and `response.json()` on a malformed
+   body would have raised an uncaught exception (only `httpx.HTTPError`
+   was ever caught) — never actually observed live, but a real gap.
+
+### APIs retained
+
+Europe PMC and ClinicalTrials.gov — both confirmed working correctly;
+the previous session's implementations were kept, not replaced (per this
+task's explicit instruction not to swap out a working API just because one
+query returned zero). openFDA — unchanged.
+
+### New API added
+
+**PubMed (NCBI E-utilities)** — `app/ingestion/pubmed.py`, new. ESearch
+for PMIDs (paginated) + EFetch (batched XML) for
+title/abstract/date/publication-types/DOI, official REST API, no
+scraping. Converts each article into the *same* paper-dict shape
+`_parse_paper` already knows how to parse for Europe PMC — critically,
+tagged with `source: "MED"`, the same tag Europe PMC uses for its own
+MEDLINE-sourced records, so a PMID Europe PMC and PubMed both return
+resolves to the identical `("pubmed", pmid)` dedup key with zero
+PubMed-specific dedup logic needed. Rate-limited to 3 concurrent requests
+(NCBI's documented no-API-key limit; `ARB_NCBI_API_KEY` raises it to 10/sec
+if set) via a module-level semaphore, independent of the general fetch
+thread pool.
+
+### What changed
+
+- **`app/core/http_fetch.py`** (new) — `get_with_retry`: shared
+  retry/backoff/classification for every source. Retries timeouts, 429
+  (honoring `Retry-After`), and 5xx with exponential backoff; a 4xx is
+  never retried (won't succeed twice); a decode failure is the caller's
+  own `parse_error`, never an uncaught exception.
+- **`app/ingestion/pubmed.py`** (new) — see above.
+- **`app/core/runtime_research.py`** — Europe PMC/ClinicalTrials.gov
+  fetchers rewritten on top of `get_with_retry` (`QueryOutcome` per
+  query: `success`/`timeout`/`http_error`/`parse_error`/`rate_limited`,
+  never an unhandled exception). Added `generate_broad_case_queries` +
+  `_broaden_term` (strips parenthetical/staging text, drops exact-phrase
+  quoting) — fires **only** when tier-1 raw item count is exactly zero
+  across every source (a bounded single retry, not unbounded query
+  generation; a query that found raw items but none passed
+  relevance-filtering is a different, legitimate outcome that broadening
+  doesn't retry). When it fires, the same simplified terms are also added
+  as extra disease-match targets — a broadened *query* alone is
+  pointless if the relevance filter still requires the original verbose
+  label's full token set verbatim. Added `_aggregate_source_attempt` (one
+  `SourceAttempt` per source per run — `success`/`no_results` only when
+  every attempted query actually completed; any hard failure among them
+  reports that failure instead, never "no_results"). Added
+  `select_relevant_local_documents` (validated-drug AND
+  case-relevant-disease gate) and moved the local-fallback decision
+  itself into this module (was split across `main.py` and here before) —
+  `run_runtime_case_research` now takes `local_documents` directly and
+  decides, with an explicit reason, whether to use it.
+- **`app/schemas/case.py`** — `SourceAttempt` (new); `ResearchMetadata`
+  gained `broadened_queries`, `source_statuses`, `used_local_fallback`,
+  `local_fallback_reason`.
+- **`app/core/config.py`** — `CASE_RESEARCH_MAX_RETRIES`,
+  `CASE_RESEARCH_RETRY_BACKOFF_SECONDS`,
+  `PUBMED_MAX_CONCURRENT_REQUESTS`, `NCBI_API_KEY` (optional).
+- **`app/main.py`** — both `run_runtime_case_research` call sites now
+  pass `local_documents` straight through instead of applying the
+  fallback themselves; `documents = runtime.documents` (the function
+  already decided).
+- **`frontend/src/api.ts`** — additive `SourceAttempt` type,
+  `ResearchMetadata` gained the four new fields. No component/UI changes.
+- **New tests**: `tests/test_http_fetch.py` (9 — success, timeout+retry,
+  5xx retry, 4xx never retried, 429+`Retry-After`, retry exhaustion),
+  `tests/test_pubmed.py` (8 — success with results, success with zero
+  results, ESearch timeout, ESearch rate-limited, malformed ESearch JSON,
+  malformed EFetch XML, EFetch http_error, XML→dict mapping), 9 new tests
+  in `tests/test_runtime_research.py` (broadening fires on zero raw
+  items / doesn't fire on irrelevant-but-nonzero items, Europe PMC+PubMed
+  duplicate-PMID dedup, local fallback after hard failure vs. after
+  genuine zero results vs. neither-relevant-nor-valid honest zero).
+  Backend: **225 passing** (202 before this task + 23 new), 0 failing.
+
+### Fallback semantics, concretely
+
+`documents = runtime.documents or local_documents` (dangerous — couldn't
+tell failure from genuine zero) is gone. `run_runtime_case_research` now:
+live evidence found → use it, `used_local_fallback: false`. Live sources
+searched cleanly and found nothing → check the local cache for
+validated+relevant evidence only; if any exists, use it and say so
+(`"Live search completed successfully but found no case-relevant
+results..."`); if not, honest zero-signal. Live sources hard-failed → same
+validated+relevant local check, but the reason names which sources were
+unavailable (`"Live sources (europepmc, clinicaltrials) were unavailable
+this run — using cached, validated local evidence as a secondary
+source..."`). A case with an API failure and zero relevant local cache
+data still returns `used_local_fallback: false` and an honest
+zero-candidate result — it never silently claims "no evidence exists"
+without saying why in `evidence_gaps`/`source_statuses`.
+
+### Live test-case results (2026-08-20, real network, real APIs)
+
+| Case | Papers | Trials | Broadened? | Candidates | Fallback |
+|---|---|---|---|---|---|
+| #13 Diabetes+HF+Metformin | 50 (epmc 120 raw, pubmed 118 raw, ctgov 88 raw) | 13 | no | 6 (metformin/empagliflozin/insulin/somatotropin/tirzepatide/semaglutide → heart failure) | no |
+| #14 Fabry Disease | 0 | 1 | no | 0 (honest — searched cleanly, nothing repurposable) | no |
+| #15 Diabetes(ontology label)+Metformin | 0 | 0 | no (tier-1's loosely-quoted `"metformin" alternative indication` query alone found raw items, so the zero-raw-item trigger didn't fire; correctly still 0 candidates since metformin's own approved indication is diabetes — nothing to repurpose here regardless) | 0 | no |
+| #16 Diabetes+Metformin (no comorbidity) | 46 | 6 | no | 0 (metformin's own known indication, correctly no signal) | no |
+| #17 Alzheimer's Disease+Metformin | 0 (60 raw found, 0 passed relevance match) | 0 | no | 0 | no |
+| #18 Diabetes(ontology label), no meds | 0 | 2 | **yes** — `["diabetes drug treatment"]` | 0 | no |
+
+Case #18 (same verbose ontology label as #15, but with no medication —
+isolates the primary-condition-only queries) is the clean live proof the
+broadening mechanism actually fires and works: all 3 tier-1 queries
+returned 0 raw items (confirmed via `source_statuses`), the broadened
+retry query was generated and run, and it found real Europe PMC/PubMed/
+ClinicalTrials.gov results (10 each) plus 2 disease-relevant trials that
+tier-1 had missed entirely.
+
+**A separate, real bug found but NOT fixed this session (out of scope —
+this task was the retrieval layer, not disease-matching/scoring logic):**
+Case #17 (Alzheimer's Disease) retrieved 60 raw Europe PMC papers and 59
+raw PubMed papers, `source_statuses` correctly reporting `success`, but 0
+passed disease-relevance filtering. Root cause, confirmed:
+`app/core/disease_matching.py`'s tokenizer (`[a-z0-9]+`) splits
+`"Alzheimer's disease"` into `{alzheimer, s, disease, ...}` (apostrophe
+treated as a token boundary), while the case's stored condition
+`"alzheimers disease"` tokenizes to `{alzheimers, disease}` — `alzheimers`
+(no apostrophe, one token) never equals `alzheimer`+`s` (two tokens), so
+`diseases_match` returns `False` for genuinely matching text. This is a
+disease-matching/tokenization issue, not a retrieval-layer issue — the
+new `source_statuses` machinery correctly identifies it as "retrieved
+successfully, filtered as not relevant" rather than miscategorizing it as
+a retrieval failure, which is exactly the distinction this audit exists to
+make possible. Flagged here for a future, explicitly-scoped session on
+`disease_matching.py`'s tokenizer (e.g. normalizing/stripping possessive
+apostrophes before tokenizing on both sides).
+
+## Disease-matching apostrophe-normalization fix (2026-08-20)
+
+Follow-up to the retrieval-layer audit's flagged-but-not-fixed issue:
+Case #17 (Alzheimer's Disease + Metformin) retrieved 60 real papers but 0
+survived relevance filtering.
+
+**Root cause, confirmed by inspection before changing anything.**
+`app/core/disease_matching.py`'s `disease_tokens()` tokenizes with
+`_WORD_RE = re.compile(r"[a-z0-9]+")`, which treats an apostrophe as a
+token boundary: `"Alzheimer's disease"` → `{"alzheimer", "s", "disease"}`.
+The case's stored condition, `"alzheimers disease"` (no apostrophe,
+however the user typed/autocomplete stored it) → `{"alzheimers",
+"disease"}`. `"alzheimers"` (one token) is never equal to `"alzheimer"` +
+`"s"` (two tokens), so `diseases_match`'s subset check failed for text
+that was, semantically, the exact same disease.
+
+**Fix — generic, not hardcoded to Alzheimer's.** New
+`strip_punctuation_variants()` deletes apostrophe-family characters
+(straight `'`, curly `'`/`'`, and backtick/acute-accent look-alikes) from
+text *before* tokenizing, applied inside `disease_tokens()`. Deliberately
+narrow to apostrophe characters only — not general punctuation stripping —
+so it can't merge unrelated disease names that happen to share a hyphen or
+other punctuation (verified: `"non-small cell lung cancer"` still doesn't
+match `"small cell lung cancer"`). This makes `"Alzheimer's disease"`,
+`"Alzheimers disease"`, and `"Alzheimer's disease"` (curly quote) all
+tokenize to the identical `{"alzheimers", "disease"}` regardless of which
+form either side of a comparison uses — and the same fix transparently
+covers every other possessive disease name (Parkinson's, Crohn's,
+Sjögren's, Graves', ...) since it's a character-class normalization, not a
+name-specific lookup.
+
+**Files changed:** `app/core/disease_matching.py` (`_APOSTROPHE_RE` +
+`strip_punctuation_variants()`, wired into `disease_tokens()`);
+`tests/test_disease_matching.py` (+8 tests: apostrophe vs. no-apostrophe,
+straight vs. curly apostrophe in both directions, generic across multiple
+possessive disease names — not just Alzheimer's, no false-positive merge
+of unrelated diseases, hyphenated terms unaffected, and the pre-existing
+pancreatic-cancer/PAH regression cases re-verified passing unchanged).
+
+**Live re-verification, Case #17 (Alzheimer's Disease + Metformin),
+before vs. after this fix (same source data, same retrieval layer,
+nothing else changed):**
+
+| | Before | After |
+|---|---|---|
+| Papers retrieved (post-filter) | 0 | 20 |
+| Trials retrieved (post-filter) | 0 | 2 |
+| Candidates | 0 | 4 — `metformin -> alzheimers disease`, `metformin -> alzheimer's disease`, `metformin -> mild cognitive impairment due to alzheimer's disease`, `atomoxetine -> mild cognitive impairment due to alzheimer's disease` |
+
+Raw retrieval counts were unchanged (`source_statuses` still show 60
+Europe PMC / 59 PubMed / 49 ClinicalTrials.gov raw items found, same as
+before) — confirming the fix is exactly where it needed to be: relevance
+filtering, not retrieval. `metformin -> Alzheimer's disease` is a real,
+active drug-repurposing research area (metformin's effect on cognitive
+decline/dementia risk is genuinely studied) — this is real evidence that
+was previously being silently discarded by a tokenization bug, not
+evidence that didn't exist.
+
+Backend: **232 passing** (225 before this fix + 7 new). Frontend: no
+changes needed, builds clean (this was a pure backend matching-logic
+fix). No API/retrieval-layer code touched — the Europe PMC/PubMed/
+ClinicalTrials.gov/openFDA implementations from the retrieval-layer audit
+are untouched.
+
+### Confirmation: API failure vs. genuine zero evidence are now distinguishable
+
+`research_metadata.source_statuses` gives one structured entry per source
+per run (`success` / `no_results` / `timeout` / `http_error` /
+`parse_error` / `rate_limited` / `not_attempted`), and `no_results` is
+only ever reported when every attempted query for that source actually
+completed — a single hard failure among them reports that failure instead.
+Verified via `tests/test_runtime_research.py::test_source_failure_is_
+recorded_not_fatal` (a scripted Europe PMC timeout is reported as
+`status: "timeout"`, not folded into "no relevant publications retrieved")
+and `test_no_signal_case_returns_zero_candidates_with_metadata` (an
+all-sources-clean-empty run reports `status: "no_results"` on each source,
+a different, honestly-distinguishable status).

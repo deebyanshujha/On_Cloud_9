@@ -26,6 +26,8 @@ export const SOURCE_LABELS: Record<string, string> = {
   clinicaltrials: "Trial",
   biorxiv: "bioRxiv",
   medrxiv: "medRxiv",
+  europepmc: "Europe PMC",
+  pubmed: "PubMed",
   manual: "Manual",
 };
 

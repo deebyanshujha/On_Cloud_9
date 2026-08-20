@@ -8,9 +8,9 @@ need to recompute anything).
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date as date_, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.db import Base
@@ -96,3 +96,29 @@ class CaseEvidenceCheckRecord(Base):
     checked_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )
+
+
+class CaseResearchEvidenceRecord(Base):
+    """Case-specific runtime research cache.
+
+    These rows are not global discovery documents. They preserve exactly
+    what a case research run retrieved for a generated query, including the
+    normalized entities and extracted relationship decisions, so a later
+    refresh can compare against the prior case evidence without polluting
+    the global signal corpus.
+    """
+
+    __tablename__ = "case_research_evidence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id"), index=True)
+    query: Mapped[str] = mapped_column(String, index=True)
+    source: Mapped[str] = mapped_column(String, index=True)
+    source_id: Mapped[str] = mapped_column(String, index=True)
+    url: Mapped[str | None] = mapped_column(String, nullable=True)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    date: Mapped[date_ | None] = mapped_column(Date, nullable=True)
+    normalized_drugs: Mapped[str] = mapped_column(Text, default="[]")
+    normalized_diseases: Mapped[str] = mapped_column(Text, default="[]")
+    relationships_json: Mapped[str] = mapped_column(Text, default="[]")
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

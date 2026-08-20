@@ -135,6 +135,7 @@ def parse_study_to_documents(study: dict, queried_drug: str) -> list[Document]:
             date=doc_date,
             url=url,
             num_mentions=1,
+            evidence_type="CLINICAL_TRIAL",
         )
         for condition in conditions
     ]
@@ -258,6 +259,7 @@ def parse_study_to_documents_discovery(study: dict) -> list[Document]:
             date=doc_date,
             url=url,
             num_mentions=1,
+            evidence_type="CLINICAL_TRIAL",
         )
         for drug_name in drug_names
         for condition in conditions

@@ -23,6 +23,7 @@ class SourceLink(BaseModel):
     url: str | None
     date: date_ | None
     phase: str | None
+    evidence_type: str | None = None
 
 
 class SignalOut(BaseModel):
@@ -73,6 +74,7 @@ def build_signal_out(signal: Signal) -> SignalOut:
                 url=d.url,
                 date=d.date,
                 phase=d.phase,
+                evidence_type=d.evidence_type,
             )
             for d in docs
         ),

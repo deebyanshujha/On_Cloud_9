@@ -176,6 +176,8 @@ _SOURCE_LABEL = {
     "clinicaltrials": "clinical trial",
     "biorxiv": "publication",
     "medrxiv": "publication",
+    "europepmc": "publication",
+    "pubmed": "publication",
 }
 
 
@@ -194,7 +196,12 @@ def _evidence_tier_reason(signal: Signal) -> str:
 def _supporting_evidence(signal: Signal) -> list[SupportingEvidence]:
     return [
         SupportingEvidence(
-            source=d.source, source_id=d.source_id, url=d.url, date=d.date, phase=d.phase
+            source=d.source,
+            source_id=d.source_id,
+            url=d.url,
+            date=d.date,
+            phase=d.phase,
+            evidence_type=d.evidence_type,
         )
         for d in signal.supporting_documents
     ]
@@ -206,6 +213,7 @@ def analyze_case(
     documents: Iterable[Document],
     approved: Iterable[ApprovedIndication],
     today: date_ | None = None,
+    target_conditions: list[str] | None = None,
 ) -> list[CandidateOut]:
     """Runs the full case-analysis flow and returns candidates sorted by
     research_priority_score, highest first."""
@@ -215,9 +223,15 @@ def analyze_case(
     signals = run_comparison(documents, approved, today=today)
     drug_labels = _build_drug_label_index(approved)
 
+    targets = []
+    for condition in [primary_condition] + (target_conditions or []):
+        normalized = normalize(condition)
+        if normalized and normalized not in targets:
+            targets.append(normalized)
+
     candidates: list[CandidateOut] = []
     for signal in signals:
-        if not _condition_matches(primary_condition, signal.disease):
+        if not any(_condition_matches(target, signal.disease) for target in targets):
             continue
 
         comorbidity_checks: list[ComorbidityCheck] = []
@@ -238,6 +252,7 @@ def analyze_case(
         candidates.append(
             CandidateOut(
                 drug=signal.drug,
+                disease=signal.disease,
                 research_priority_score=score,
                 evidence_strength_score=evidence_strength_score(signal),
                 known_indications=signal.approved_for,
