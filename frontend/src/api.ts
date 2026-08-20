@@ -52,6 +52,48 @@ export interface BackendStatus {
   sources: Record<string, SourceStatus>;
 }
 
+export interface ScholarProfile {
+  id: number;
+  email: string;
+  username: string;
+  role: "scholar";
+  created_at: string | null;
+}
+
+export interface AuthSession {
+  access_token: string;
+  token_type: "bearer";
+  profile: ScholarProfile;
+}
+
+export interface ScholarContribution {
+  id: number;
+  title: string;
+  summary: string;
+  drug: string | null;
+  disease: string | null;
+  source_url: string | null;
+  author_name: string;
+  organization: string | null;
+  created_at: string | null;
+}
+
+export interface ScholarProfileInput {
+  full_name: string;
+  organization: string;
+  organization_id: string;
+  phone_number: string;
+  experience: string;
+}
+
+export interface ScholarContributionInput {
+  title: string;
+  summary: string;
+  drug: string;
+  disease: string;
+  source_url: string;
+}
+
 // --- TheraLens Cases (Phase 2) ----------------------------------------------
 
 export interface CaseOut {
@@ -238,6 +280,56 @@ async function sendJson<T>(path: string, method: "POST" | "PATCH", body?: unknow
     throw new Error(`${method} ${path} -> ${response.status}`);
   }
   return response.json() as Promise<T>;
+}
+
+async function authJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? "Authentication request failed");
+  }
+  return response.json() as Promise<T>;
+}
+
+export function registerScholar(email: string, username: string, password: string): Promise<AuthSession> {
+  return authJson<AuthSession>("/auth/register", { email, username, password });
+}
+
+export function loginScholar(identifier: string, password: string): Promise<AuthSession> {
+  return authJson<AuthSession>("/auth/login", { identifier, password });
+}
+
+export async function fetchScholarProfile(token: string): Promise<ScholarProfile> {
+  const response = await fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error("Your scholar session has expired");
+  return response.json() as Promise<ScholarProfile>;
+}
+
+async function authorizedJson<T>(path: string, method: "POST" | "PATCH", token: string, body: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? "Scholar request failed");
+  }
+  return response.json() as Promise<T>;
+}
+
+export function updateScholarProfile(token: string, input: ScholarProfileInput): Promise<ScholarProfile> {
+  return authorizedJson<ScholarProfile>("/auth/me", "PATCH", token, input);
+}
+
+export function createScholarContribution(token: string, input: ScholarContributionInput): Promise<ScholarContribution> {
+  return authorizedJson<ScholarContribution>("/scholar/contributions", "POST", token, input);
+}
+
+export function fetchCommunityResearch(): Promise<ScholarContribution[]> {
+  return getJson<ScholarContribution[]>("/community-research");
 }
 
 export function fetchSignals(): Promise<Signal[]> {

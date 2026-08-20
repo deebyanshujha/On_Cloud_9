@@ -32,6 +32,7 @@ def init_db() -> None:
         document,
         ingestion_status,
         known_drug,
+        user,
     )
 
     Base.metadata.create_all(bind=engine)

@@ -13,6 +13,7 @@ scispacy>=0.6
 # Added in step 8 (API layer):
 fastapi>=0.110
 uvicorn[standard]>=0.27
+PyJWT>=2.8
 
 # Not added yet (later build steps):
 # apscheduler (Step 7 — scheduler — deliberately deferred in favor of Step 8)

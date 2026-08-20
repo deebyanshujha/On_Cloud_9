@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 
 export function currentPath(): string {
   const hash = window.location.hash.replace(/^#/, "");
-  return hash || "/";
+  return hash || "/landing";
 }
 
 export function navigate(path: string): void {

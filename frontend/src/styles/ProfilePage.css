@@ -1,0 +1,710 @@
+/* ==========================================================================
+   Scholar Profile Page — MedBridge design-system aligned
+   All values use tokens from tokens.css / index.css
+   ========================================================================== */
+
+/* ── Page wrapper ────────────────────────────────────────────────────────── */
+
+.profile-page {
+  padding: 36px clamp(20px, 4vw, 64px) 72px;
+  max-width: none; /* override the 650px cap set in index.css */
+}
+
+/* ── Empty auth state ────────────────────────────────────────────────────── */
+
+.profile-empty-auth {
+  max-width: 480px;
+  margin: 64px auto;
+  padding: 48px;
+  text-align: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-subtle);
+}
+
+.profile-empty-auth h2 {
+  font: 400 24px var(--font-display);
+  color: var(--color-ink);
+  margin-bottom: var(--space-3);
+  letter-spacing: -0.015em;
+}
+
+.profile-empty-auth p {
+  font: 14px/1.6 var(--font-ui);
+  color: var(--color-ink-muted);
+  margin-bottom: var(--space-8);
+}
+
+.profile-empty-auth .cta-button {
+  width: 100%;
+}
+
+/* ── Identity header block ───────────────────────────────────────────────── */
+
+.profile-page .eyebrow {
+  margin: 0 0 var(--space-2);
+  color: var(--color-accent);
+  font: 10px var(--font-data);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.profile-page h1 {
+  margin: 0 0 var(--space-6);
+  font: 400 clamp(28px, 3vw, 42px) var(--font-display);
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--color-ink);
+}
+
+/* ── Profile identity card ───────────────────────────────────────────────── */
+
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+  padding: var(--space-6);
+  border: 1px solid var(--color-rule);
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-subtle);
+}
+
+.profile-avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: #fff;
+  font: 700 22px var(--font-display);
+}
+
+.profile-card div {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.profile-card strong {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--color-ink);
+}
+
+.profile-card span {
+  color: var(--color-ink-muted);
+  font-size: 12px;
+}
+
+/* ── Privacy note ────────────────────────────────────────────────────────── */
+
+.profile-note {
+  font-size: 13px;
+  color: var(--color-ink-muted);
+  line-height: 1.6;
+  margin-bottom: var(--space-10);
+  max-width: 70ch;
+  padding: var(--space-4) var(--space-5);
+  border-left: 3px solid var(--color-accent-soft);
+  background: var(--color-surface);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* ── Accordion sections ──────────────────────────────────────────────────── */
+
+.accordion {
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  margin-bottom: var(--space-5);
+  box-shadow: var(--shadow-subtle);
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+
+.accordion:hover {
+  border-color: var(--color-rule-strong);
+}
+
+.accordion--open {
+  border-color: var(--color-rule-strong);
+}
+
+/* ── Accordion trigger (clickable header bar) ────────────────────────────── */
+
+.accordion-trigger {
+  appearance: none;
+  border: none;
+  background: transparent;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-6);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.accordion-trigger:hover {
+  background: rgba(0, 0, 0, 0.015);
+}
+
+.accordion-trigger-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.accordion-trigger-left h2 {
+  margin: 0;
+  font: 400 22px var(--font-display);
+  letter-spacing: -0.015em;
+  color: var(--color-ink);
+}
+
+.accordion-preview {
+  font: 12px var(--font-ui);
+  color: var(--color-ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 400px;
+}
+
+.accordion-preview--accent {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.accordion-trigger-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.accordion-badge {
+  font: 10px var(--font-data);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+  border: 1px solid var(--color-rule-strong);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.accordion-count {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: #fff;
+  font: 700 10px var(--font-data);
+}
+
+.accordion-chevron {
+  font-size: 14px;
+  color: var(--color-ink-faint);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-block;
+}
+
+.accordion-chevron--open {
+  transform: rotate(180deg);
+}
+
+/* ── Accordion body (collapsible content) ────────────────────────────────── */
+
+.accordion-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.accordion--open .accordion-body {
+  grid-template-rows: 1fr;
+}
+
+.accordion-body-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.accordion--open .accordion-body-inner {
+  overflow: visible;
+}
+
+/* Apply padding to children so the wrapper can collapse fully to 0 */
+.accordion-body-inner > * {
+  padding-left: var(--space-6);
+  padding-right: var(--space-6);
+}
+
+.accordion-body-inner > *:last-child {
+  padding-bottom: var(--space-6);
+}
+
+/* ── Form column ─────────────────────────────────────────────────────────── */
+
+.profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Sub-group cluster ───────────────────────────────────────────────────── */
+
+.profile-fieldgroup {
+  margin-bottom: var(--space-8);
+}
+
+.profile-fieldgroup:last-of-type {
+  margin-bottom: var(--space-6);
+}
+
+.profile-group-label {
+  display: block;
+  margin-bottom: var(--space-4);
+  font: 600 9px var(--font-data);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px dashed var(--color-rule);
+}
+
+/* ── Field grid inside a sub-group ──────────────────────────────────────── */
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.form-grid.form-grid-single {
+  grid-template-columns: 1fr;
+}
+
+.profile-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+/* ── Labels ──────────────────────────────────────────────────────────────── */
+
+.profile-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font: 600 10px var(--font-data);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
+/* ORCID iD and source link get mono input text */
+.profile-form label.label-code input {
+  font-family: var(--font-data);
+  letter-spacing: 0.04em;
+}
+
+/* ── Inputs, textareas, selects ──────────────────────────────────────────── */
+
+.profile-form input,
+.profile-form textarea,
+.profile-form select {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-ink);
+  font: 13px var(--font-ui);
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+  box-shadow: var(--shadow-subtle);
+}
+
+.profile-form input::placeholder,
+.profile-form textarea::placeholder {
+  color: var(--color-ink-faint);
+  font-style: italic;
+}
+
+.profile-form input:focus,
+.profile-form textarea:focus,
+.profile-form select:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.profile-form textarea {
+  min-height: 100px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+/* Slightly taller summary textarea */
+.profile-form textarea.textarea-tall {
+  min-height: 130px;
+}
+
+/* ── Field helper text ───────────────────────────────────────────────────── */
+
+.profile-field-hint {
+  margin-top: var(--space-1);
+  font: 10px var(--font-ui);
+  color: var(--color-ink-faint);
+  font-style: italic;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* ── Contribution form intro text ────────────────────────────────────────── */
+
+.contribution-intro {
+  font-size: 13px;
+  color: var(--color-ink-muted);
+  line-height: 1.6;
+  margin-bottom: var(--space-6);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+}
+
+/* ── Primary action buttons ──────────────────────────────────────────────── */
+
+.profile-submit {
+  align-self: flex-start;
+  margin-top: var(--space-4);
+  padding: 10px 22px;
+  background: var(--color-accent);
+  color: #fff;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  font: 700 10px var(--font-data);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s ease;
+  box-shadow: 3px 3px 0 var(--color-accent-soft);
+}
+
+.profile-submit:hover {
+  background: var(--color-accent-strong);
+  border-color: var(--color-accent-strong);
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--color-accent-soft);
+}
+
+.profile-submit:active {
+  transform: translate(0, 0);
+  box-shadow: 1px 1px 0 var(--color-accent-soft);
+}
+
+/* ── Sign-out button ─────────────────────────────────────────────────────── */
+
+.profile-logout-row {
+  margin-top: var(--space-10);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--color-rule);
+}
+
+.profile-logout {
+  appearance: none;
+  border: 1px solid var(--color-rule-strong);
+  background: transparent;
+  color: var(--color-ink-muted);
+  padding: 9px 18px;
+  border-radius: var(--radius-md);
+  font: 600 10px var(--font-data);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.profile-logout:hover {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+/* ── Success / feedback message ──────────────────────────────────────────── */
+
+.profile-success {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+  padding: var(--space-3) var(--space-5);
+  background: var(--color-good-soft);
+  border: 1px solid var(--color-good);
+  border-radius: var(--radius-md);
+  color: var(--color-good);
+  font: 600 12px var(--font-data);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.profile-success::before {
+  content: "✓";
+  font-size: 14px;
+}
+
+/* ==========================================================================
+   Multi-paper queue (Contribute Research)
+   ========================================================================== */
+
+/* ── Queue container ─────────────────────────────────────────────────────── */
+
+.paper-queue {
+  margin-bottom: var(--space-8);
+}
+
+.paper-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ── Individual queued paper card ─────────────────────────────────────────── */
+
+.paper-queue-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.paper-queue-card:hover {
+  border-color: var(--color-rule-strong);
+}
+
+.paper-queue-card--editing {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+
+.paper-queue-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.paper-queue-title {
+  display: block;
+  font: 600 13px var(--font-ui);
+  color: var(--color-ink);
+  margin-bottom: var(--space-2);
+  line-height: 1.35;
+}
+
+.paper-queue-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.paper-queue-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  font: 600 9px var(--font-data);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-rule);
+}
+
+.paper-queue-tag--drug {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border-color: var(--color-accent-soft);
+}
+
+.paper-queue-tag--disease {
+  background: var(--color-info-soft);
+  color: var(--color-info);
+  border-color: var(--color-info-soft);
+}
+
+.paper-queue-summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ── Queue card action buttons ───────────────────────────────────────────── */
+
+.paper-queue-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.paper-queue-btn {
+  appearance: none;
+  border: 1px solid var(--color-rule);
+  background: var(--color-surface);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--color-ink-faint);
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.paper-queue-btn--edit:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.paper-queue-btn--remove:hover {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+/* ── Paper entry form ────────────────────────────────────────────────────── */
+
+.paper-entry-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+}
+
+/* Inherit profile-form label and input styles */
+.paper-entry-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font: 600 10px var(--font-data);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
+.paper-entry-form input,
+.paper-entry-form textarea,
+.paper-entry-form select {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-ink);
+  font: 13px var(--font-ui);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: var(--shadow-subtle);
+}
+
+.paper-entry-form input::placeholder,
+.paper-entry-form textarea::placeholder {
+  color: var(--color-ink-faint);
+  font-style: italic;
+}
+
+.paper-entry-form input:focus,
+.paper-entry-form textarea:focus,
+.paper-entry-form select:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.paper-entry-form textarea {
+  min-height: 100px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.paper-entry-form label.label-code input {
+  font-family: var(--font-data);
+  letter-spacing: 0.04em;
+}
+
+/* ── Entry action row ────────────────────────────────────────────────────── */
+
+.paper-entry-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+/* Secondary "Add to queue" button — outlined, not filled */
+.profile-submit--secondary {
+  background: transparent;
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  box-shadow: none;
+}
+
+.profile-submit--secondary:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+  transform: none;
+  box-shadow: none;
+}
+
+.paper-entry-cancel {
+  appearance: none;
+  border: 1px solid var(--color-rule-strong);
+  background: transparent;
+  color: var(--color-ink-muted);
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  font: 600 10px var(--font-data);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.paper-entry-cancel:hover {
+  color: var(--color-ink);
+  border-color: var(--color-ink);
+}
+
+/* ── Submit-all CTA ──────────────────────────────────────────────────────── */
+
+.paper-submit-all {
+  align-self: stretch;
+  text-align: center;
+  padding: 14px 22px;
+  font-size: 11px;
+  box-shadow: 4px 4px 0 var(--color-accent-soft);
+}

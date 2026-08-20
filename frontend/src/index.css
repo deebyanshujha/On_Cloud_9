@@ -159,6 +159,37 @@ a {
 .platform-availability { gap: 7px; color: var(--color-good); font: 10px var(--font-data); text-transform: uppercase; letter-spacing: 0.06em; }
 .platform-availability i { width: 6px; height: 6px; border-radius: 50%; background: var(--color-good); }
 
+.account-control { border: 1px solid var(--color-rule); background: var(--color-surface); font: 10px var(--font-data); text-transform: uppercase; letter-spacing: .05em; }
+.account-control button { appearance: none; border: 0; background: transparent; color: var(--color-ink); font: inherit; cursor: pointer; padding: 7px 9px; }
+.account-control.guest { display: flex; align-items: center; gap: 7px; border-color: var(--color-accent); background: var(--color-accent); color: #fff8f5; cursor: pointer; padding: 9px 12px; box-shadow: 3px 3px 0 var(--color-accent-soft); transition: background .15s ease, transform .15s ease; }
+.account-control.guest:hover { background: var(--color-accent-strong); transform: translate(-1px, -1px); }
+.account-control.guest strong { padding-left: 8px; border-left: 1px solid rgba(255,255,255,.45); font-weight: 700; }
+.account-mode-dot { width: 7px; height: 7px; border-radius: 50%; background: #fff8f5; box-shadow: 0 0 0 3px rgba(255,255,255,.16); }
+.account-control.scholar { display: flex; align-items: center; gap: 2px; border-color: var(--color-accent); }
+.account-control.scholar > span { background: var(--color-accent); color: #fff; padding: 7px 9px; font-weight: 700; letter-spacing: .06em; }
+.account-control.scholar > button:first-child { font-weight: 600; }
+.account-logout { color: var(--color-ink-muted) !important; border-left: 1px solid var(--color-rule) !important; }
+
+.sidebar-account { margin: 4px 16px 18px; padding: 11px 12px; text-align: left; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); color: #d8e5df; cursor: pointer; font-family: var(--font-data); }
+.sidebar-account span, .sidebar-account strong { display: block; }
+.sidebar-account span { color: #79c9b0; font-size: 9px; letter-spacing: .08em; }
+.sidebar-account strong { margin-top: 5px; font-size: 10px; font-weight: 400; line-height: 1.35; }
+
+.auth-page { min-height: 100vh; display: grid; place-items: center; padding: 28px; background: var(--color-canvas); }
+.auth-card { width: min(100%, 440px); padding: 38px; border: 1px solid var(--color-rule-strong); background: var(--color-surface); box-shadow: 12px 12px 0 var(--color-accent-soft); }
+.auth-brand { border: 0; background: transparent; padding: 0; color: var(--color-accent-strong); font: 700 16px var(--font-data); cursor: pointer; letter-spacing: .06em; }
+.eyebrow { margin: 30px 0 9px; color: var(--color-accent); font: 10px var(--font-data); letter-spacing: .1em; }
+.auth-card h1 { margin: 0; font: 500 42px var(--font-display); }
+.auth-copy { color: var(--color-ink-muted); font-size: 13px; line-height: 1.6; }
+.auth-form { display: grid; gap: 14px; margin-top: 24px; }
+.auth-form label { display: grid; gap: 6px; color: var(--color-ink-muted); font: 10px var(--font-data); text-transform: uppercase; letter-spacing: .05em; }
+.auth-form input { width: 100%; padding: 11px; border: 1px solid var(--color-rule-strong); outline-color: var(--color-accent); background: var(--color-canvas); color: var(--color-ink); font: 14px var(--font-ui); }
+.auth-submit { border: 1px solid var(--color-accent); background: var(--color-accent); color: white; padding: 12px; cursor: pointer; font: 700 11px var(--font-data); text-transform: uppercase; letter-spacing: .05em; }
+.auth-submit:disabled { opacity: .6; cursor: wait; }
+.auth-error { margin: 0; color: var(--color-danger); font-size: 12px; }
+.auth-switch, .auth-guest { display: block; width: 100%; border: 0; background: transparent; color: var(--color-ink-muted); cursor: pointer; margin-top: 14px; font: 11px var(--font-data); }
+.auth-guest { color: var(--color-accent-strong); }
+
 .main {
   width: min(100%, var(--content-width));
   margin: 0 auto;
@@ -986,6 +1017,27 @@ input:focus-visible {
 }
 
 .sidebar-link.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.sidebar-nav-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 4px;
+}
+
+.sidebar-link-scholar {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.sidebar-link-scholar:hover {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.sidebar-link-scholar.active {
   color: var(--accent);
   background: var(--accent-dim);
 }

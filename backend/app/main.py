@@ -15,11 +15,14 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
 from app.core.case_analysis import analyze_case
+from app.core.auth import create_access_token, find_user, get_current_scholar, hash_password, profile_for, verify_password
 from app.core.config import SEARCH_RESULT_LIMIT
 from app.core.evidence_diff import diff_candidates
 from app.core.runtime_research import run_runtime_case_research
@@ -46,6 +49,7 @@ from app.ingestion.store import (
     set_case_saved,
 )
 from app.models.case import CaseRecord
+from app.models.user import ScholarContributionRecord, UserRecord
 from app.models.db import SessionLocal, init_db
 from app.schemas.api import (
     SearchResultsOut,
@@ -64,6 +68,10 @@ from app.schemas.case import (
     CaseWithAnalysis,
     EvidenceCheckResult,
     RecheckAllResult,
+)
+from app.schemas.auth import (
+    AuthSession, ScholarContributionCreate, ScholarContributionOut, ScholarCredentials,
+    ScholarLogin, ScholarProfile, ScholarProfileUpdate,
 )
 
 
@@ -120,6 +128,107 @@ app.add_middleware(
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.post("/auth/register", response_model=AuthSession, status_code=status.HTTP_201_CREATED)
+def register_scholar(credentials: ScholarCredentials) -> AuthSession:
+    email = credentials.email.strip().lower()
+    username = credentials.username.strip().lower()
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise HTTPException(status_code=422, detail="Enter a valid email address")
+    if not username.replace("_", "").replace("-", "").isalnum():
+        raise HTTPException(status_code=422, detail="Username may use letters, numbers, hyphens, and underscores")
+
+    session = SessionLocal()
+    try:
+        if find_user(session, email) or find_user(session, username):
+            raise HTTPException(status_code=409, detail="Email or username is already registered")
+        user = UserRecord(email=email, username=username, password_hash=hash_password(credentials.password))
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        return AuthSession(access_token=create_access_token(user), profile=profile_for(user))
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="Email or username is already registered")
+    finally:
+        session.close()
+
+
+@app.post("/auth/login", response_model=AuthSession)
+def login_scholar(credentials: ScholarLogin) -> AuthSession:
+    session = SessionLocal()
+    try:
+        user = find_user(session, credentials.identifier)
+        if user is None or not verify_password(credentials.password, user.password_hash):
+            raise HTTPException(status_code=401, detail="Incorrect email/username or password")
+        return AuthSession(access_token=create_access_token(user), profile=profile_for(user))
+    finally:
+        session.close()
+
+
+@app.get("/auth/me", response_model=ScholarProfile)
+def scholar_profile(profile: ScholarProfile = Depends(get_current_scholar)) -> ScholarProfile:
+    return profile
+
+
+@app.patch("/auth/me", response_model=ScholarProfile)
+def update_scholar_profile(
+    update: ScholarProfileUpdate, profile: ScholarProfile = Depends(get_current_scholar)
+) -> ScholarProfile:
+    session = SessionLocal()
+    try:
+        user = session.get(UserRecord, profile.id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="Scholar account not found")
+        for field, value in update.model_dump().items():
+            setattr(user, field, value.strip() if isinstance(value, str) else value)
+        session.commit()
+        session.refresh(user)
+        return profile_for(user)
+    finally:
+        session.close()
+
+
+def _contribution_out(record: ScholarContributionRecord, author: UserRecord) -> ScholarContributionOut:
+    return ScholarContributionOut(
+        id=record.id, title=record.title, summary=record.summary, drug=record.drug, disease=record.disease,
+        source_url=record.source_url, author_name=author.full_name or author.username,
+        organization=author.organization, created_at=record.created_at,
+    )
+
+
+@app.get("/community-research", response_model=list[ScholarContributionOut])
+def community_research() -> list[ScholarContributionOut]:
+    session = SessionLocal()
+    try:
+        rows = session.execute(
+            select(ScholarContributionRecord, UserRecord)
+            .join(UserRecord, UserRecord.id == ScholarContributionRecord.user_id)
+            .order_by(ScholarContributionRecord.created_at.desc())
+            .limit(30)
+        ).all()
+        return [_contribution_out(record, author) for record, author in rows]
+    finally:
+        session.close()
+
+
+@app.post("/scholar/contributions", response_model=ScholarContributionOut, status_code=status.HTTP_201_CREATED)
+def create_scholar_contribution(
+    contribution: ScholarContributionCreate, profile: ScholarProfile = Depends(get_current_scholar)
+) -> ScholarContributionOut:
+    session = SessionLocal()
+    try:
+        record = ScholarContributionRecord(
+            user_id=profile.id, **{key: value.strip() if isinstance(value, str) else value for key, value in contribution.model_dump().items()}
+        )
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        author = session.get(UserRecord, profile.id)
+        return _contribution_out(record, author)
+    finally:
+        session.close()
 
 
 @app.get("/status")

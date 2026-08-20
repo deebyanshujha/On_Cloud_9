@@ -8,15 +8,19 @@ import EvidenceExplorer from "./pages/EvidenceExplorer";
 import NewCase from "./pages/NewCase";
 import ResearchSignals from "./pages/ResearchSignals";
 import LandingPage from "./pages/LandingPage";
+import LoginPage from "./pages/LoginPage";
+import ScholarProfilePage from "./pages/ScholarProfilePage";
+import { AuthProvider, useAuth } from "./auth";
 import { matchRoute, navigate, useRoute } from "./router";
 
 function routeLabel(path: string): string {
   if (path === "/") return "Overview Dashboard";
   if (path === "/cases") return "Cases";
   if (path.startsWith("/cases/")) return "Case Analysis";
-  if (path === "/signals") return "Research Signals";
-  if (path.startsWith("/drugs")) return "Drug Intelligence";
   if (path === "/evidence") return "Evidence Explorer";
+  if (path === "/drugs") return "Drug Intelligence";
+  if (path === "/signals") return "Research Signals";
+  if (path === "/profile") return "Scholar Profile";
   return "Clinical Intelligence";
 }
 
@@ -36,16 +40,23 @@ function renderRoute(path: string) {
   const drugMatch = matchRoute("/drugs/:name", path);
   if (drugMatch) return <DrugExplorer initialDrug={drugMatch.name} />;
   if (path === "/signals") return <ResearchSignals />;
+  if (path === "/profile") return <ScholarProfilePage />;
 
   return <Dashboard />;
 }
 
 export default function App() {
+  return <AuthProvider><AppShell /></AuthProvider>;
+}
+
+function AppShell() {
   const path = useRoute();
+  const { profile, logout } = useAuth();
 
   if (path === "/landing") {
     return <div className="route-transition" key={path}><LandingPage /></div>;
   }
+  if (path === "/login") return <LoginPage />;
 
   return (
     <div className="app app-shell">
@@ -63,6 +74,19 @@ export default function App() {
               <input placeholder="Search case data..." aria-label="Search case data" />
             </label>
             <span className="platform-availability"><i /> system ready</span>
+            {profile ? (
+              <div className="account-control scholar">
+                <button onClick={() => navigate("/profile")}>{profile.username}</button>
+                <span>scholar</span>
+                <button className="account-logout" onClick={logout}>sign out</button>
+              </div>
+            ) : (
+              <button className="account-control guest" onClick={() => navigate("/login")}>
+                <span className="account-mode-dot" aria-hidden="true" />
+                <span>Guest mode</span>
+                <strong>Sign in</strong>
+              </button>
+            )}
           </div>
         </header>
         <main className="main">

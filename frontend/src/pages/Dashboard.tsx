@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchBackendStatus,
+  fetchCommunityResearch,
   fetchSignals,
   getConflicts,
   listCases,
@@ -9,6 +10,7 @@ import {
   type CaseSummary,
   type BackendStatus,
   type Signal,
+  type ScholarContribution,
 } from "../api";
 import { navigate } from "../router";
 import { scoreTier } from "../scoring";
@@ -29,6 +31,7 @@ export default function Dashboard() {
   const [conflicts, setConflicts] = useState<CaseConflictOut[] | null>(null);
   const [backendStatus, setBackendStatus] = useState<BackendStatus | null>(null);
   const [checkingAll, setCheckingAll] = useState(false);
+  const [communityResearch, setCommunityResearch] = useState<ScholarContribution[]>([]);
 
   const reloadCases = () => listCases().then(setCases).catch(() => setCases([]));
 
@@ -37,6 +40,7 @@ export default function Dashboard() {
     fetchSignals().then(setSignals).catch(() => setSignals([]));
     getConflicts().then(setConflicts).catch(() => setConflicts([]));
     fetchBackendStatus().then(setBackendStatus).catch(() => setBackendStatus(null));
+    fetchCommunityResearch().then(setCommunityResearch).catch(() => setCommunityResearch([]));
   }, []);
 
   async function handleCheckAllSaved() {
@@ -156,6 +160,16 @@ export default function Dashboard() {
                 ))}
               </ul>
             )}
+          </section>
+
+          <section className="dash-panel community-research-panel">
+            <div className="dash-panel-head"><h2>Scholar Community Research</h2><span className="dash-panel-count mono">{communityResearch.length}</span></div>
+            {communityResearch.length === 0 ? <div className="dash-empty">No scholar notes shared yet. Scholars can contribute from their profile.</div> : <ul className="dash-list">
+              {communityResearch.slice(0, 4).map((note) => <li key={note.id} className="dash-list-row community-note">
+                <span className="dash-row-title">{note.source_url ? <a href={note.source_url} target="_blank" rel="noreferrer">{note.title}</a> : note.title}<small>{note.author_name}{note.organization ? ` · ${note.organization}` : ""}</small></span>
+                <span className="dash-row-meta">{note.drug && note.disease ? `${note.drug} → ${note.disease}` : "Scholar note"}</span>
+              </li>)}
+            </ul>}
           </section>
 
           <section className="dash-panel ingest-status-panel">

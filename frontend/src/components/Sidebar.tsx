@@ -1,4 +1,6 @@
 import { navigate } from "../router";
+import { useAuth } from "../auth";
+
 
 interface NavItem {
   path: string;
@@ -14,11 +16,16 @@ const NAV_ITEMS: NavItem[] = [
   { path: "/signals", label: "Research Radar", match: (p) => p === "/signals" },
 ];
 
+const SCHOLAR_NAV_ITEMS: NavItem[] = [
+  { path: "/profile", label: "Scholar Profile", match: (p) => p === "/profile" },
+];
+
 interface Props {
   path: string;
 }
 
 export default function Sidebar({ path }: Props) {
+  const { profile } = useAuth();
   return (
     <nav className="sidebar">
       <div className="brand">
@@ -40,7 +47,26 @@ export default function Sidebar({ path }: Props) {
             {item.label}
           </button>
         ))}
+        {profile && (
+          <>
+            <div className="sidebar-nav-divider" />
+            {SCHOLAR_NAV_ITEMS.map((item) => (
+              <button
+                key={item.path}
+                className={`sidebar-link sidebar-link-scholar ${item.match(path) ? "active" : ""}`}
+                onClick={() => navigate(item.path)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </>
+        )}
       </div>
+
+      <button className="sidebar-account" onClick={() => navigate(profile ? "/profile" : "/login")}>
+        <span>{profile ? "SCHOLAR" : "GUEST MODE"}</span>
+        <strong>{profile ? profile.username : "Sign in to create a scholar profile"}</strong>
+      </button>
 
       <div className="sidebar-footer">
         <span>data: ClinicalTrials.gov · openFDA · Europe PMC</span>
