@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  fetchBackendStatus,
   fetchSignals,
   getConflicts,
   listCases,
   recheckAllCases,
   type CaseConflictOut,
   type CaseSummary,
+  type BackendStatus,
   type Signal,
 } from "../api";
 import { navigate } from "../router";
@@ -25,6 +27,7 @@ export default function Dashboard() {
   const [cases, setCases] = useState<CaseSummary[] | null>(null);
   const [signals, setSignals] = useState<Signal[] | null>(null);
   const [conflicts, setConflicts] = useState<CaseConflictOut[] | null>(null);
+  const [backendStatus, setBackendStatus] = useState<BackendStatus | null>(null);
   const [checkingAll, setCheckingAll] = useState(false);
 
   const reloadCases = () => listCases().then(setCases).catch(() => setCases([]));
@@ -33,6 +36,7 @@ export default function Dashboard() {
     reloadCases();
     fetchSignals().then(setSignals).catch(() => setSignals([]));
     getConflicts().then(setConflicts).catch(() => setConflicts([]));
+    fetchBackendStatus().then(setBackendStatus).catch(() => setBackendStatus(null));
   }, []);
 
   async function handleCheckAllSaved() {
@@ -70,7 +74,7 @@ export default function Dashboard() {
       .slice(0, 8);
   }, [signals]);
 
-  const loading = cases === null || signals === null || conflicts === null;
+  const loading = cases === null || signals === null || conflicts === null || backendStatus === null;
 
   return (
     <div className="page">
@@ -83,6 +87,29 @@ export default function Dashboard() {
         <div className="empty-state">loading dashboard…</div>
       ) : (
         <>
+          <div className="dashboard-overview-grid">
+            <div className="dashboard-metric-card">
+              <span>Active signals</span>
+              <strong>{signals.length}</strong>
+              <small>ranked research associations</small>
+            </div>
+            <div className="dashboard-metric-card metric-alert">
+              <span>High priority</span>
+              <strong>{highPrioritySignals.length}</strong>
+              <small>score tier ≥ 0.70</small>
+            </div>
+            <div className="dashboard-metric-card">
+              <span>Patient cases</span>
+              <strong>{cases.length}</strong>
+              <small>{savedCases.length} saved for monitoring</small>
+            </div>
+            <div className="dashboard-metric-card">
+              <span>Evidence sources</span>
+              <strong>{new Set(signals.flatMap((signal) => signal.sources.map((source) => source.source_id))).size}</strong>
+              <small>trials, preprints, and labels</small>
+            </div>
+          </div>
+
           {savedCases.length > 0 && (
             <div
               className={`new-evidence-banner ${casesWithNewEvidence.length > 0 ? "status-critical" : "status-good"}`}
@@ -129,6 +156,23 @@ export default function Dashboard() {
                 ))}
               </ul>
             )}
+          </section>
+
+          <section className="dash-panel ingest-status-panel">
+            <div className="dash-panel-head">
+              <h2>Ingestion Status</h2>
+              <span className="dash-panel-count mono">{backendStatus.signal_count} signals</span>
+            </div>
+            <ul className="dash-list">
+              {Object.entries(backendStatus.sources).map(([source, sourceStatus]) => (
+                <li key={source} className="dash-list-row">
+                  <span className="dash-row-title">{source}</span>
+                  <span className={`dash-row-meta mono ${sourceStatus.status === "error" ? "status-critical" : "status-good"}`}>
+                    {sourceStatus.status} · {sourceStatus.items_ingested} items
+                  </span>
+                </li>
+              ))}
+            </ul>
           </section>
 
           <section className="dash-panel">

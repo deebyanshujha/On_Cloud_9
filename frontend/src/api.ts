@@ -40,6 +40,18 @@ export interface TerminologySearchResult {
   source_unavailable: boolean;
 }
 
+export interface SourceStatus {
+  status: string;
+  message: string | null;
+  items_ingested: number;
+  checked_at: string | null;
+}
+
+export interface BackendStatus {
+  signal_count: number;
+  sources: Record<string, SourceStatus>;
+}
+
 // --- TheraLens Cases (Phase 2) ----------------------------------------------
 
 export interface CaseOut {
@@ -235,6 +247,10 @@ export function fetchSignals(): Promise<Signal[]> {
 export function searchSignals(query: string, limit = 20, offset = 0): Promise<SearchResults> {
   const params = new URLSearchParams({ q: query, limit: String(limit), offset: String(offset) });
   return getJson<SearchResults>(`/search?${params.toString()}`);
+}
+
+export function fetchBackendStatus(): Promise<BackendStatus> {
+  return getJson<BackendStatus>("/status");
 }
 
 export function fetchSignalsForDrug(drug: string): Promise<Signal[]> {

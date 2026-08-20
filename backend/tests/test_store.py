@@ -67,6 +67,22 @@ def test_upsert_skips_exact_duplicates_on_rerun():
     assert len(load_all_documents(session)) == 1
 
 
+def test_upsert_skips_duplicates_within_one_document_batch():
+    session = make_session()
+    document = Document(
+        drug="metformin",
+        disease="pancreatic cancer",
+        source="clinicaltrials",
+        source_id="NCT-TEST-0001",
+    )
+
+    inserted, skipped = upsert_documents(session, [document, document])
+
+    assert inserted == 1
+    assert skipped == 1
+    assert len(load_all_documents(session)) == 1
+
+
 def test_upsert_normalizes_drug_and_disease_case():
     session = make_session()
     docs = [

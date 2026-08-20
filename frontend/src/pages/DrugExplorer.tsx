@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchSignals, searchMedications, type Signal } from "../api";
 import AutocompleteInput from "../components/AutocompleteInput";
+import { navigate } from "../router";
 import { scoreTier, SCORE_TIER_LABEL } from "../scoring";
 
 interface DrugSummary {
@@ -23,10 +24,14 @@ async function medicationOptions(query: string): Promise<string[]> {
   return res.results.map((r) => r.name);
 }
 
-export default function DrugExplorer() {
+interface Props {
+  initialDrug?: string;
+}
+
+export default function DrugExplorer({ initialDrug }: Props) {
   const [signals, setSignals] = useState<Signal[] | null>(null);
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initialDrug ?? null);
 
   useEffect(() => {
     fetchSignals().then(setSignals).catch(() => setSignals([]));
@@ -57,8 +62,7 @@ export default function DrugExplorer() {
     return [...map.values()].sort((a, b) => b.topScore - a.topScore);
   }, [signals]);
 
-  // Real evidence we actually have, filtered against whatever the clean
-  // terminology search box is currently holding — a suggestion picked from
+  // Real evidence we actually have, filtered against the clean
   // /medications/search, or free-typed text either way.
   const filtered = useMemo(() => {
     const q = baseName(query.trim() || query);
@@ -99,7 +103,10 @@ export default function DrugExplorer() {
                 <li
                   key={d.drug}
                   className={`explorer-list-row ${selected === d.drug ? "active" : ""}`}
-                  onClick={() => setSelected(d.drug)}
+                  onClick={() => {
+                    setSelected(d.drug);
+                    navigate(`/drugs/${encodeURIComponent(d.drug)}`);
+                  }}
                 >
                   <span className="explorer-list-title">{d.drug}</span>
                   <span className={`badge ${scoreTier(d.topScore)}`}>{SCORE_TIER_LABEL[scoreTier(d.topScore)]}</span>

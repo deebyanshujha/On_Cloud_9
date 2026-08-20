@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Signal } from "../api";
 import { scoreTier, SOURCE_LABELS } from "../scoring";
+import { SignalScoreBreakdown } from "./ScoreBreakdown";
 
 interface Props {
   signal: Signal;
@@ -86,6 +87,7 @@ export default function OpportunityCard({ signal }: Props) {
         <div className="card-detail">
           <div>
             <div className="detail-section-label">Why it's flagged</div>
+            <SignalScoreBreakdown signal={signal} />
             <div className="reasons-list">
               {signal.reasons.map((r, i) => (
                 <span className="reason-chip" key={i}>

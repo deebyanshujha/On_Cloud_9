@@ -35,9 +35,19 @@ const DRUG_COLOR = "#e7ebf3";
 const DRUG_COLLAPSED_COLOR = "#7c8ba3";
 const DISEASE_COLOR = "#a9b3c8";
 
-const MAX_HUBS = 18;
-const HUB_RADIUS = 220;
+// A network overview is useful only if its labels can be read. Ten hubs fit
+// comfortably around the ring at normal dashboard widths; users can inspect
+// the rest via search/filters rather than starting with a wall of text.
+const MAX_HUBS = 10;
+const HUB_RADIUS = 270;
 const DISEASE_RADIUS_STEP = 90;
+const MAX_VISIBLE_LABEL_LENGTH = 20;
+
+function visibleLabel(label: string) {
+  return label.length > MAX_VISIBLE_LABEL_LENGTH
+    ? `${label.slice(0, MAX_VISIBLE_LABEL_LENGTH - 1)}…`
+    : label;
+}
 
 // Rendering every drug-disease edge in the dataset at once (the previous
 // version) produces hundreds of overlapping labels — unreadable regardless
@@ -48,7 +58,9 @@ const DISEASE_RADIUS_STEP = 90;
 // to render more than a handful of nodes at a time.
 export default function NetworkGraph({ signals }: Props) {
   const fgRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
 
   const drugHubs = useMemo(() => {
     const byDrug = new Map<string, { count: number; topScore: number }>();
@@ -113,12 +125,28 @@ export default function NetworkGraph({ signals }: Props) {
     return { nodes: Array.from(nodeMap.values()), links };
   }, [drugHubs, expanded, signals]);
 
+  // ForceGraph's automatic measurement can observe a zero/stale size while
+  // this tab is becoming visible. That leaves the canvas at the wrong scale
+  // and collapses otherwise fixed radial positions into a dense label pile.
+  // Measure the visible graph panel ourselves and refit whenever its graph
+  // data changes.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      if (width > 0 && height > 0) setSize({ width, height });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     const fg = fgRef.current;
-    if (!fg) return;
+    if (!fg || !size) return;
     const timer = setTimeout(() => fg.zoomToFit(400, 70), 60);
     return () => clearTimeout(timer);
-  }, [nodes.length]);
+  }, [nodes, links, size]);
 
   function toggleDrug(drug: string) {
     setExpanded((prev) => {
@@ -130,7 +158,7 @@ export default function NetworkGraph({ signals }: Props) {
   }
 
   return (
-    <div className="graph-wrap">
+    <div className="graph-wrap" ref={containerRef}>
       <div className="graph-legend">
         <div className="graph-legend-item">
           <span className="graph-legend-swatch" style={{ background: DRUG_COLOR }} />
@@ -154,14 +182,16 @@ export default function NetworkGraph({ signals }: Props) {
         </div>
       </div>
       <div className="graph-hint">
-        showing the top {drugHubs.length} drugs by evidence strength · click a drug to reveal its
-        studied diseases · click again to collapse
+        showing the top {drugHubs.length} drugs by evidence strength · hover for full names · click a drug to
+        reveal its studied diseases
       </div>
-      <ForceGraph2D
+      {size && <ForceGraph2D
         ref={fgRef}
         graphData={{ nodes, links } as any}
+        width={size.width}
+        height={size.height}
         backgroundColor="#13161e"
-        cooldownTicks={1}
+        cooldownTicks={0}
         nodeRelSize={4}
         nodeVal={(n: any) => ((n as GraphNode).kind === "drug" ? 10 : 4)}
         nodeColor={(n: any) => {
@@ -188,9 +218,9 @@ export default function NetworkGraph({ signals }: Props) {
           ctx.textAlign = "center";
           ctx.textBaseline = "top";
           ctx.fillStyle = n.kind === "drug" ? "#e7ebf3" : "#8b93a7";
-          ctx.fillText(n.label, n.x ?? 0, (n.y ?? 0) + 7);
+          ctx.fillText(visibleLabel(n.label), n.x ?? 0, (n.y ?? 0) + 7);
         }}
-      />
+      />}
     </div>
   );
 }

@@ -22,9 +22,9 @@ export default function Sidebar({ path }: Props) {
   return (
     <nav className="sidebar">
       <div className="brand">
-        <span className="bracket">[</span>THERALENS<span className="bracket">]</span>
+        <span className="bracket">[</span>MEDBRIDGE<span className="bracket">]</span>
       </div>
-      <div className="brand-sub">patient-context repurposing intelligence</div>
+      <div className="brand-sub">biomedical research intelligence</div>
 
       <button className="new-case-cta" onClick={() => navigate("/cases/new")}>
         + New Case

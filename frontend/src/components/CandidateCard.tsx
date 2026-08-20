@@ -9,6 +9,7 @@ import {
   SOURCE_LABELS,
   worstConflictState,
 } from "../scoring";
+import { CandidateScoreBreakdown } from "./ScoreBreakdown";
 
 interface Props {
   candidate: CandidateOut;
@@ -103,6 +104,7 @@ function WhyAppeared({ candidate }: { candidate: CandidateOut }) {
           </li>
         ))}
       </ol>
+      <CandidateScoreBreakdown candidate={candidate} />
 
       {candidate.primary_condition_evidence.length > 0 && (
         <div className="evidence-links">
