@@ -79,6 +79,8 @@ export interface ScholarContribution {
 }
 
 export interface ScholarProfileInput {
+  email?: string;
+  username?: string;
   full_name: string;
   organization: string;
   organization_id: string;

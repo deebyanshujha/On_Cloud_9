@@ -44,6 +44,12 @@ export default function ScholarProfilePage() {
   const [message, setMessage] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
+  // Identity-card inline edit
+  const [editingIdentity, setEditingIdentity] = useState(false);
+  const [identityDraft, setIdentityDraft] = useState({ username: "", email: "" });
+  const [identitySaving, setIdentitySaving] = useState(false);
+  const [identityError, setIdentityError] = useState("");
+
   // Accordion state — both collapsed by default for a clean initial view
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [contributeOpen, setContributeOpen] = useState(false);
@@ -142,11 +148,111 @@ export default function ScholarProfilePage() {
         <span className="profile-avatar">
           {profile.username.slice(0, 1).toUpperCase()}
         </span>
-        <div>
-          <strong>{profile.username}</strong>
-          <span>{profile.email}</span>
-          <span>Research scholar account</span>
-        </div>
+        {editingIdentity ? (
+          <form
+            className="profile-card-edit-form"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setIdentityError("");
+              const trimmedUsername = identityDraft.username.trim().toLowerCase();
+              const trimmedEmail = identityDraft.email.trim().toLowerCase();
+              if (!trimmedUsername || !trimmedEmail) {
+                setIdentityError("Username and email are required.");
+                return;
+              }
+              setIdentitySaving(true);
+              try {
+                await updateProfile({
+                  ...details,
+                  username: trimmedUsername,
+                  email: trimmedEmail,
+                });
+                setEditingIdentity(false);
+                setMessage("Account details updated.");
+              } catch (err: unknown) {
+                setIdentityError(
+                  err instanceof Error ? err.message : "Failed to update account details."
+                );
+              } finally {
+                setIdentitySaving(false);
+              }
+            }}
+          >
+            <label>
+              Username
+              <input
+                value={identityDraft.username}
+                onChange={(e) =>
+                  setIdentityDraft({ ...identityDraft, username: e.target.value })
+                }
+                placeholder="Your username"
+                required
+                minLength={3}
+                maxLength={40}
+                autoFocus
+              />
+            </label>
+            <label>
+              Email
+              <input
+                type="email"
+                value={identityDraft.email}
+                onChange={(e) =>
+                  setIdentityDraft({ ...identityDraft, email: e.target.value })
+                }
+                placeholder="scholar@example.com"
+                required
+                minLength={5}
+                maxLength={254}
+              />
+            </label>
+            {identityError && (
+              <p className="identity-edit-error">{identityError}</p>
+            )}
+            <div className="identity-edit-actions">
+              <button
+                type="submit"
+                className="profile-submit"
+                disabled={identitySaving}
+              >
+                {identitySaving ? "Saving…" : "Save changes"}
+              </button>
+              <button
+                type="button"
+                className="paper-entry-cancel"
+                onClick={() => {
+                  setEditingIdentity(false);
+                  setIdentityError("");
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="profile-card-display">
+            <div>
+              <strong>{profile.username}</strong>
+              <span>{profile.email}</span>
+              <span>Research scholar account</span>
+            </div>
+            <button
+              type="button"
+              className="profile-card-edit-btn"
+              title="Edit username and email"
+              onClick={() => {
+                setIdentityDraft({
+                  username: profile.username,
+                  email: profile.email,
+                });
+                setIdentityError("");
+                setEditingIdentity(true);
+              }}
+            >
+              ✎
+            </button>
+          </div>
+        )}
       </div>
 
       <p className="profile-note">

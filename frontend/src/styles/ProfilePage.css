@@ -100,6 +100,104 @@
   font-size: 12px;
 }
 
+/* ── Profile card display (view mode with edit button) ───────────────────── */
+
+.profile-card-display {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-card-display > div {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.profile-card-edit-btn {
+  appearance: none;
+  border: 1px solid var(--color-rule);
+  background: var(--color-surface);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  color: var(--color-ink-faint);
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.profile-card-edit-btn:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+/* ── Profile card edit form (inline) ─────────────────────────────────────── */
+
+.profile-card-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-card-edit-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font: 600 10px var(--font-data);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
+.profile-card-edit-form input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-ink);
+  font: 13px var(--font-ui);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: var(--shadow-subtle);
+}
+
+.profile-card-edit-form input::placeholder {
+  color: var(--color-ink-faint);
+  font-style: italic;
+}
+
+.profile-card-edit-form input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.identity-edit-error {
+  margin: 0;
+  font: 600 11px var(--font-ui);
+  color: var(--color-danger);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-danger-soft);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+}
+
+.identity-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
+}
+
 /* ── Privacy note ────────────────────────────────────────────────────────── */
 
 .profile-note {
