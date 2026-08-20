@@ -76,6 +76,7 @@ class SupportingEvidence(BaseModel):
     url: str | None
     date: date_ | None
     phase: str | None
+    evidence_type: Optional[str] = None
 
 
 class ComorbidityCheck(BaseModel):
@@ -112,6 +113,12 @@ class CandidateOut(BaseModel):
     as a research signal — never a recommendation."""
 
     drug: str
+    disease: str = Field(
+        default="",
+        description="The case-relevant disease/condition this drug is being "
+        "studied for. Defaults to empty for backward compatibility with "
+        "older stored analyses.",
+    )
     research_priority_score: float
     evidence_strength_score: float = Field(
         description="The underlying repurposing-signal score from the "
@@ -147,11 +154,88 @@ class CandidateOut(BaseModel):
     )
 
 
+class RejectedDrug(BaseModel):
+    raw_name: str
+    normalized_name: Optional[str] = None
+    reason: str
+    source: Optional[str] = None
+
+
+class RejectedRelationship(BaseModel):
+    drug: Optional[str] = None
+    disease: Optional[str] = None
+    source: str
+    source_id: str
+    evidence_type: str
+    reason: str
+
+
+class SourceAttempt(BaseModel):
+    """Structured per-source retrieval outcome for one case run — the
+    difference between "searched and found nothing" and "the request
+    failed" that a flat evidence_gaps string can't reliably convey. One
+    entry per source (europepmc, pubmed, clinicaltrials, openfda) per run,
+    aggregated across every query attempted against that source this run."""
+
+    source: str
+    status: Literal[
+        "success",
+        "no_results",
+        "timeout",
+        "http_error",
+        "parse_error",
+        "rate_limited",
+        "not_attempted",
+    ]
+    results_found: int = 0
+    queries_attempted: int = 0
+    error: Optional[str] = None
+
+
+class ResearchMetadata(BaseModel):
+    queries: list[str] = Field(default_factory=list)
+    broadened_queries: list[str] = Field(
+        default_factory=list,
+        description="Second-tier, less-restrictive queries actually run "
+        "because the first-tier exact-phrase queries came back with zero "
+        "results from every live source — not a fixed part of every run.",
+    )
+    papers_retrieved: int = 0
+    trials_retrieved: int = 0
+    valid_drugs: list[str] = Field(default_factory=list)
+    normalized_drugs: list[str] = Field(default_factory=list)
+    rejected_drugs: list[RejectedDrug] = Field(default_factory=list)
+    valid_drug_disease_relationships: int = 0
+    rejected_relationships: list[RejectedRelationship] = Field(default_factory=list)
+    candidate_count: int = 0
+    evidence_gaps: list[str] = Field(default_factory=list)
+    source_counts: dict[str, int] = Field(default_factory=dict)
+    source_statuses: list[SourceAttempt] = Field(
+        default_factory=list,
+        description="One structured status per retrieval source for this "
+        "run (see SourceAttempt) — lets a caller tell 'API succeeded with "
+        "zero relevant results' apart from 'API failed/timed out/was "
+        "rate-limited', which evidence_gaps' free-text strings alone "
+        "cannot guarantee.",
+    )
+    used_local_fallback: bool = False
+    local_fallback_reason: Optional[str] = Field(
+        default=None,
+        description="Set only when used_local_fallback is true. Explains "
+        "*why* the cached local corpus was consulted — a live-source "
+        "failure ('...were unavailable, using cached evidence as a "
+        "secondary source') reads very differently from a clean empty "
+        "search ('...found no case-relevant results; checked cached "
+        "evidence for validated, relevant signals').",
+    )
+
+
 class AnalysisResult(BaseModel):
     case_id: int
     primary_condition: str
     analyzed_at: datetime
     candidates: list[CandidateOut]
+    research_metadata: ResearchMetadata = Field(default_factory=ResearchMetadata)
 
 
 class CandidateChange(BaseModel):
@@ -202,6 +286,11 @@ class EvidenceCheckResult(BaseModel):
     checked_at: datetime
     has_new_evidence: bool
     changes: list[CandidateChange] = Field(default_factory=list)
+    new_papers: list[str] = Field(default_factory=list)
+    new_trials: list[str] = Field(default_factory=list)
+    changed_evidence: list[str] = Field(default_factory=list)
+    new_candidates: list[str] = Field(default_factory=list)
+    removed_invalidated_candidates: list[str] = Field(default_factory=list)
     message: str
 
 

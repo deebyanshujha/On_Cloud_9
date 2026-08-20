@@ -12,7 +12,36 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.main as main_module
+from app.core.runtime_research import RuntimeResearchResult
 from app.models.db import Base
+from app.schemas.case import ResearchMetadata
+
+
+def _fake_runtime_research(
+    session,
+    *,
+    case_id,
+    primary_condition,
+    comorbidities,
+    current_medications,
+    local_approved,
+    local_documents=None,
+):
+    """No-network stand-in for run_runtime_case_research used by the
+    `client` fixture below. Real Europe PMC/PubMed/ClinicalTrials.gov calls
+    have no place in this offline unit-test suite (they were previously
+    hanging the whole suite until the httpx timeout) — case-analysis tests
+    instead seed local documents/approved indications directly and this
+    stub hands them straight through as if they were the live-fetched
+    result, mirroring (without the network-bound RxNorm validation calls)
+    the real function's local-fallback behavior. Tests that need to
+    exercise runtime research's own retrieval/validation/fallback logic
+    live in tests/test_runtime_research.py with the HTTP fetchers mocked."""
+    return RuntimeResearchResult(
+        documents=list(local_documents or []),
+        approved_indications=list(local_approved),
+        metadata=ResearchMetadata(),
+    )
 
 
 @pytest.fixture()
@@ -29,6 +58,7 @@ def client(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main_module, "SessionLocal", test_session_local)
     monkeypatch.setattr(main_module, "init_db", fake_init_db)
+    monkeypatch.setattr(main_module, "run_runtime_case_research", _fake_runtime_research)
 
     return TestClient(main_module.app)
 

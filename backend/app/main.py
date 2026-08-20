@@ -22,6 +22,7 @@ from pydantic import ValidationError
 from app.core.case_analysis import analyze_case
 from app.core.config import SEARCH_RESULT_LIMIT
 from app.core.evidence_diff import diff_candidates
+from app.core.runtime_research import run_runtime_case_research
 from app.core.scoring import run_comparison
 from app.core.search import rank_search_results
 from app.core.terminology import search_conditions, search_medications
@@ -35,6 +36,7 @@ from app.ingestion.store import (
     load_all_approved_indications,
     load_all_documents,
     load_case_analysis,
+    load_case_research_evidence,
     load_case_snapshot,
     load_evidence_check,
     load_source_statuses,
@@ -63,6 +65,17 @@ from app.schemas.case import (
     EvidenceCheckResult,
     RecheckAllResult,
 )
+
+
+def _cache_source_ids(records) -> tuple[set[str], set[str]]:
+    paper_ids: set[str] = set()
+    trial_ids: set[str] = set()
+    for record in records:
+        if record.source == "clinicaltrials":
+            trial_ids.add(record.source_id)
+        else:
+            paper_ids.add(f"{record.source}:{record.source_id}")
+    return paper_ids, trial_ids
 
 
 def _compute_signals() -> list[SignalOut]:
@@ -397,21 +410,35 @@ def analyze_case_endpoint(case_id: int) -> AnalysisResult:
             raise HTTPException(status_code=404, detail=f"No case found with id {case_id}")
 
         comorbidities = get_case_conditions(session, case_id)
-        documents = load_all_documents(session)
+        local_documents = load_all_documents(session)
         approved = load_all_approved_indications(session)
+        runtime = run_runtime_case_research(
+            session,
+            case_id=case.id,
+            primary_condition=case.primary_condition,
+            comorbidities=comorbidities,
+            current_medications=get_case_medications(session, case_id),
+            local_approved=approved,
+            local_documents=local_documents,
+        )
+        documents = runtime.documents
+        approved = runtime.approved_indications
 
         candidates = analyze_case(
             primary_condition=case.primary_condition,
             comorbidities=comorbidities,
             documents=documents,
             approved=approved,
+            target_conditions=comorbidities,
         )
+        runtime.metadata.candidate_count = len(candidates)
 
         result = AnalysisResult(
             case_id=case.id,
             primary_condition=case.primary_condition,
             analyzed_at=datetime.now(timezone.utc),
             candidates=candidates,
+            research_metadata=runtime.metadata,
         )
         save_case_analysis(session, case_id, result.model_dump_json())
         return result
@@ -436,31 +463,61 @@ def _run_recheck(session, case: CaseRecord) -> EvidenceCheckResult | None:
         return None
 
     comorbidities = get_case_conditions(session, case.id)
-    documents = load_all_documents(session)
+    previous_papers, previous_trials = _cache_source_ids(
+        load_case_research_evidence(session, case.id)
+    )
+    local_documents = load_all_documents(session)
     approved = load_all_approved_indications(session)
+    runtime = run_runtime_case_research(
+        session,
+        case_id=case.id,
+        primary_condition=case.primary_condition,
+        comorbidities=comorbidities,
+        current_medications=get_case_medications(session, case.id),
+        local_approved=approved,
+        local_documents=local_documents,
+    )
+    documents = runtime.documents
+    approved = runtime.approved_indications
     candidates = analyze_case(
         primary_condition=case.primary_condition,
         comorbidities=comorbidities,
         documents=documents,
         approved=approved,
+        target_conditions=comorbidities,
     )
+    runtime.metadata.candidate_count = len(candidates)
 
     now = datetime.now(timezone.utc)
     # Re-checking also refreshes the "last analysis" record, same as
     # POST /analyze — the case page should reflect the freshest run either
     # way, not just whatever the diff was computed against.
     fresh_result = AnalysisResult(
-        case_id=case.id, primary_condition=case.primary_condition, analyzed_at=now, candidates=candidates
+        case_id=case.id,
+        primary_condition=case.primary_condition,
+        analyzed_at=now,
+        candidates=candidates,
+        research_metadata=runtime.metadata,
     )
     save_case_analysis(session, case.id, fresh_result.model_dump_json())
 
     changes = diff_candidates(snapshot.candidates, candidates)
-    has_new_evidence = bool(changes)
-    message = (
-        f"New evidence detected for {len(changes)} candidate(s) since this case was saved."
-        if has_new_evidence
-        else "No new evidence detected since this case was saved."
-    )
+    new_papers = sorted(runtime.paper_source_ids - previous_papers)
+    new_trials = sorted(runtime.trial_source_ids - previous_trials)
+    snapshot_drugs = {c.drug for c in snapshot.candidates}
+    current_drugs = {c.drug for c in candidates}
+    new_candidate_drugs = sorted(current_drugs - snapshot_drugs)
+    removed_candidate_drugs = sorted(snapshot_drugs - current_drugs)
+    has_new_evidence = bool(changes or new_papers or new_trials)
+    if changes:
+        message = f"New evidence detected for {len(changes)} candidate(s) since this case was saved."
+    elif has_new_evidence:
+        message = (
+            f"New source evidence found since this case was saved "
+            f"({len(new_papers)} publication(s), {len(new_trials)} trial(s))."
+        )
+    else:
+        message = "No new evidence detected since this case was saved."
 
     result = EvidenceCheckResult(
         case_id=case.id,
@@ -469,6 +526,11 @@ def _run_recheck(session, case: CaseRecord) -> EvidenceCheckResult | None:
         checked_at=now,
         has_new_evidence=has_new_evidence,
         changes=changes,
+        new_papers=new_papers,
+        new_trials=new_trials,
+        changed_evidence=[change.summary for change in changes],
+        new_candidates=new_candidate_drugs,
+        removed_invalidated_candidates=removed_candidate_drugs,
         message=message,
     )
     save_evidence_check(session, case.id, has_new_evidence, result.model_dump_json())

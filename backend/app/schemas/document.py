@@ -9,8 +9,27 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-SourceType = Literal["clinicaltrials", "biorxiv", "medrxiv", "manual"]
+SourceType = Literal[
+    "clinicaltrials",
+    "biorxiv",
+    "medrxiv",
+    "europepmc",
+    "pubmed",
+    "manual",
+]
 GroundTruthSource = Literal["openfda", "manual"]
+EvidenceType = Literal[
+    "CLINICAL_TRIAL",
+    "RANDOMIZED_TRIAL",
+    "HUMAN_STUDY",
+    "OBSERVATIONAL",
+    "SYSTEMATIC_REVIEW",
+    "META_ANALYSIS",
+    "PRECLINICAL",
+    "MECHANISTIC",
+    "CASE_REPORT",
+    "MENTION_ONLY",
+]
 
 
 class Document(BaseModel):
@@ -24,6 +43,7 @@ class Document(BaseModel):
     date: Optional[date_] = None
     url: Optional[str] = None
     num_mentions: int = 1
+    evidence_type: EvidenceType | None = None
 
     def normalized_drug(self) -> str:
         return self.drug.strip().lower()

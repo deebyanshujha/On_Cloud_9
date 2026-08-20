@@ -66,6 +66,32 @@ STAGING_QUALIFIERS = {
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
+# Apostrophe characters that show up in real disease names' possessive
+# forms ("Alzheimer's", "Parkinson's", "Crohn's", "Sjogren's", ...) —
+# straight ASCII, both curly/typographic quote directions, and the
+# backtick/acute-accent look-alikes some sources use as a substitute.
+# Stripped (deleted, not replaced with a space) before tokenizing so
+# "Alzheimer's" and "Alzheimers" collapse to the exact same single token
+# ("alzheimers") regardless of which form either side of a comparison
+# happens to use — see disease_tokens()/strip_punctuation_variants().
+_APOSTROPHE_RE = re.compile(r"['‘’ʼ`´]")
+
+
+def strip_punctuation_variants(text: str) -> str:
+    """Deletes apostrophe/quote-mark characters from `text` so possessive
+    disease names normalize the same way whether the source spells them
+    with a straight apostrophe, a curly/typographic one, or omits it
+    entirely (a real, confirmed mismatch: ClinicalTrials.gov/openFDA/case
+    input spell "Alzheimer's disease" one way, a case's free-text field
+    might say "Alzheimers disease" another way, and Europe PMC/PubMed
+    abstracts can use either straight `'` or curly `’` — all four must
+    tokenize identically). Deliberately narrow: only apostrophe-family
+    characters are touched, not general punctuation, so this can't merge
+    two otherwise-distinct disease names together (e.g. "non-small cell
+    lung cancer" still tokenizes on the hyphen exactly as before — hyphens
+    aren't apostrophes)."""
+    return _APOSTROPHE_RE.sub("", text)
+
 # Generic trial-eligibility/study-metadata terms real ClinicalTrials.gov
 # "conditions" sometimes use that are not actual diseases. Found by
 # inspecting Step 3's live metformin pull (backend/scripts/ingest_clinicaltrials.py).
@@ -147,8 +173,11 @@ def is_too_generic_to_match(observed_tokens: set[str]) -> bool:
 
 def disease_tokens(text: str, strip_qualifiers: bool = False) -> set[str]:
     """Lowercased word tokens, optionally with staging/qualifier words
-    removed."""
-    words = _WORD_RE.findall(text.lower())
+    removed. Apostrophe characters are stripped before tokenizing (see
+    strip_punctuation_variants) so "Alzheimer's disease" and "Alzheimers
+    disease" produce the identical token set regardless of which form
+    either side of a comparison happens to use."""
+    words = _WORD_RE.findall(strip_punctuation_variants(text.lower()))
     if strip_qualifiers:
         words = [w for w in words if w not in STAGING_QUALIFIERS]
     return set(words)

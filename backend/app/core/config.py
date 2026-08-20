@@ -65,3 +65,29 @@ SEARCH_RESULT_LIMIT = _int_env("ARB_SEARCH_RESULT_LIMIT", 20)
 # should answer "what's worth investigating," not enumerate every matching
 # signal.
 MAX_CANDIDATES_PER_CASE = _int_env("ARB_MAX_CANDIDATES_PER_CASE", 10)
+
+# Runtime case research budgets. These are separate from global discovery:
+# a case run is user-triggered and should gather enough source-backed
+# evidence to answer that case, without dumping unrelated global signals.
+CASE_RESEARCH_TIME_WINDOW_DAYS = _int_env("ARB_CASE_RESEARCH_TIME_WINDOW_DAYS", 3650)
+CASE_RESEARCH_MAX_PAPERS = _int_env("ARB_CASE_RESEARCH_MAX_PAPERS", 50)
+CASE_RESEARCH_MAX_TRIALS = _int_env("ARB_CASE_RESEARCH_MAX_TRIALS", 50)
+CASE_RESEARCH_RESULTS_PER_QUERY = _int_env("ARB_CASE_RESEARCH_RESULTS_PER_QUERY", 10)
+
+# Retry/backoff for case-research HTTP calls (Europe PMC, PubMed,
+# ClinicalTrials.gov). Retries only apply to outcomes that might genuinely
+# succeed on a second attempt (timeouts, 429 rate-limiting, 5xx) — never to
+# a clean HTTP 200 with zero hits, and never to a 4xx client error or
+# malformed-JSON response, since retrying those wastes a request budget on
+# something a retry can't fix. See app/core/runtime_research.py's
+# `_request_with_retry`.
+CASE_RESEARCH_MAX_RETRIES = _int_env("ARB_CASE_RESEARCH_MAX_RETRIES", 2)
+CASE_RESEARCH_RETRY_BACKOFF_SECONDS = _float_env("ARB_CASE_RESEARCH_RETRY_BACKOFF_SECONDS", 0.5)
+
+# PubMed E-utilities (NCBI) is rate-limited to 3 req/sec without an API key
+# (10/sec with one — ARB_NCBI_API_KEY, optional). This caps how many PubMed
+# requests this process issues concurrently, independent of the general
+# CASE_RESEARCH_FETCH_WORKERS thread-pool size used for Europe PMC/CT.gov,
+# so a case with many queries can't trip NCBI's rate limit.
+PUBMED_MAX_CONCURRENT_REQUESTS = _int_env("ARB_PUBMED_MAX_CONCURRENT_REQUESTS", 3)
+NCBI_API_KEY = os.environ.get("ARB_NCBI_API_KEY") or None

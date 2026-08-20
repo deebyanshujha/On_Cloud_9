@@ -191,6 +191,7 @@ def parse_preprint_to_documents(
             date=doc_date,
             url=url,
             num_mentions=1,
+            evidence_type="HUMAN_STUDY" if source == "medrxiv" else "PRECLINICAL",
         )
         for disease in diseases
     ]
@@ -312,6 +313,7 @@ def parse_preprint_to_documents_discovery(paper: dict, nlp: NerModel) -> list[Do
             date=doc_date,
             url=url,
             num_mentions=1,
+            evidence_type="HUMAN_STUDY" if source == "medrxiv" else "PRECLINICAL",
         )
         for drug in drugs
         for disease in diseases

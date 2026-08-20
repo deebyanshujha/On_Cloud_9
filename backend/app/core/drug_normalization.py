@@ -46,13 +46,23 @@ _SALT_AND_FORM_WORDS = {
     "citcitrate", "citrate", "phosphate", "acetate", "besylate", "maleate",
     "mesylate", "tartrate", "succinate", "hemihydrate", "monohydrate",
     "tablet", "tablets", "capsule", "capsules", "injection", "injectable",
-    "oral", "solution", "extended", "release", "er", "xr", "sr", "ir",
+    "oral", "pill", "pills", "solution", "extended", "release", "er", "xr", "sr", "ir",
     "immediate", "delayed",
 }
 
 # Matches a dosage/strength token like "500mg", "10 mcg", "2.5g", "100units".
 _STRENGTH_RE = re.compile(
     r"^\d+(\.\d+)?\s*(mg|mcg|g|ml|iu|units?)$", re.IGNORECASE
+)
+
+# Same strength pattern, but matched inline against the whole string before
+# tokenizing — CT.gov intervention names commonly space the number from the
+# unit ("Ertugliflozin 5 mg", "Ertugliflozin 15 mg"), which _STRENGTH_RE's
+# single-token match can't catch (it'd see "5" and "mg" as two separate,
+# individually-innocuous tokens) and which would otherwise leave dose
+# variants of the same drug as distinct canonical names.
+_STRENGTH_INLINE_RE = re.compile(
+    r"\b\d+(\.\d+)?\s*(mg|mcg|g|ml|iu|units?)\b", re.IGNORECASE
 )
 
 # Trial-structure suffixes CT.gov intervention names sometimes carry
@@ -86,6 +96,15 @@ _JUNK_EXACT_NAMES = {
     "exercise", "physical therapy", "counseling", "usual treatment",
 }
 
+# Tokens that never appear inside a real drug/ingredient name — unlike the
+# exact-name/length checks above, these are safe to match anywhere in the
+# string, since "Placebo (subcutaneous)" or "Matching Placebo Injection" are
+# exactly as non-drug as bare "Placebo". Checked as whole words, not
+# substrings, so this can't accidentally reject a real drug name that merely
+# contains these letters.
+_JUNK_TOKENS = {"placebo", "sham"}
+
+
 # A "drug" name this long is almost never a real medication — it's
 # description/protocol text that leaked into the intervention field (e.g.
 # "Rapid ESC-Guideline Based Secondary Prevention Following Myocardial
@@ -110,7 +129,10 @@ def is_junk_drug_name(raw: str) -> bool:
     if not raw or not raw.strip():
         return True
 
-    if _basic_clean(raw) in _JUNK_EXACT_NAMES:
+    cleaned = _basic_clean(raw)
+    if cleaned in _JUNK_EXACT_NAMES:
+        return True
+    if _JUNK_TOKENS & set(cleaned.split()):
         return True
 
     stripped = _TRAILING_FILLER_RE.sub("", raw.strip())
@@ -164,6 +186,7 @@ def normalize_drug_name(raw: str) -> str:
     text = _LEADING_FILLER_RE.sub("", text)
     text = _TRAILING_FILLER_RE.sub("", text)
     text = text.lower()
+    text = _STRENGTH_INLINE_RE.sub(" ", text)
     text = _PUNCT_RE.sub(" ", text)
 
     tokens = [t for t in _WHITESPACE_RE.split(text) if t]
