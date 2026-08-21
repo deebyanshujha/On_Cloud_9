@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+   import MedicineFactOfTheDay from "../components/MedicineFactOfTheDay";
 import {
   fetchBackendStatus,
   fetchCommunityResearch,
@@ -85,6 +86,7 @@ export default function Dashboard() {
       <div className="page-head">
         <h1>Dashboard</h1>
         <p className="page-subtitle">Your cases and the research signals behind them.</p>
+           <MedicineFactOfTheDay />
       </div>
 
       {loading ? (
