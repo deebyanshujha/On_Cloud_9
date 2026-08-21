@@ -9,8 +9,12 @@ from sqlalchemy.orm import sessionmaker
 from app.ingestion.store import (
     create_case,
     get_case,
+    get_case_biomarkers,
     get_case_conditions,
+    get_case_genetic_markers,
     get_case_medications,
+    get_case_phenotypes,
+    get_case_previous_treatments,
     load_case_analysis,
     save_case_analysis,
     set_case_saved,
@@ -90,6 +94,98 @@ def test_set_case_saved_flips_flag():
 def test_set_case_saved_returns_none_for_unknown_id():
     session = make_session()
     assert set_case_saved(session, 999, True) is None
+
+
+# --- Richer patient-context profile (schema/data-model plumbing phase) ----
+
+
+def test_create_case_with_only_original_fields_still_works():
+    """Old-shaped call (no keyword args at all) must keep working
+    unchanged — proves the new richer-context parameters are purely
+    additive."""
+    session = make_session()
+    case = create_case(
+        session,
+        primary_condition="some condition",
+        comorbidities=["a comorbidity"],
+        current_medications=["a medication"],
+    )
+    assert case.primary_condition == "some condition"
+    assert case.age_group is None
+    assert case.sex is None
+    assert case.disease_stage is None
+    assert case.disease_subtype is None
+    assert case.disease_duration is None
+    assert get_case_phenotypes(session, case.id) == []
+    assert get_case_previous_treatments(session, case.id) == []
+    assert get_case_biomarkers(session, case.id) == []
+    assert get_case_genetic_markers(session, case.id) == []
+
+
+def test_create_case_persists_richer_patient_context_fields():
+    session = make_session()
+    case = create_case(
+        session,
+        primary_condition="some condition",
+        comorbidities=[],
+        current_medications=[],
+        age_group="adult",
+        sex="female",
+        disease_stage="stage III",
+        disease_subtype="triple-negative",
+        disease_duration="8 years",
+        phenotypes=["Fatigue", "Peripheral Neuropathy"],
+        previous_treatments=[
+            {"name": "Metformin 500mg", "response": "no response"},
+            {"name": "Insulin"},
+        ],
+        biomarkers=[{"name": "HER2", "value": "positive"}, {"name": "PD-L1"}],
+        genetic_markers=[
+            {"gene": "BRCA1", "variant": "c.68_69delAG", "note": "pathogenic"},
+        ],
+    )
+
+    refetched = get_case(session, case.id)
+    assert refetched.age_group == "adult"
+    assert refetched.sex == "female"
+    assert refetched.disease_stage == "stage III"
+    assert refetched.disease_subtype == "triple-negative"
+    assert refetched.disease_duration == "8 years"
+
+    # Phenotypes normalize the same way comorbidities do (disease-like text).
+    assert set(get_case_phenotypes(session, case.id)) == {"fatigue", "peripheral neuropathy"}
+
+    treatments = get_case_previous_treatments(session, case.id)
+    assert {"name": "metformin", "response": "no response"} in treatments
+    assert {"name": "insulin", "response": None} in treatments
+
+    biomarkers = get_case_biomarkers(session, case.id)
+    # Biomarker name/value preserve original casing (not lowercased).
+    assert {"name": "HER2", "value": "positive"} in biomarkers
+    assert {"name": "PD-L1", "value": None} in biomarkers
+
+    genetic_markers = get_case_genetic_markers(session, case.id)
+    assert genetic_markers == [
+        {"gene": "BRCA1", "variant": "c.68_69delAG", "note": "pathogenic"}
+    ]
+
+
+def test_create_case_skips_blank_entries_in_new_list_fields():
+    session = make_session()
+    case = create_case(
+        session,
+        primary_condition="condition x",
+        comorbidities=[],
+        current_medications=[],
+        phenotypes=["", "   "],
+        previous_treatments=[{"name": ""}, {"name": "  "}],
+        biomarkers=[{"name": ""}],
+        genetic_markers=[{"gene": ""}],
+    )
+    assert get_case_phenotypes(session, case.id) == []
+    assert get_case_previous_treatments(session, case.id) == []
+    assert get_case_biomarkers(session, case.id) == []
+    assert get_case_genetic_markers(session, case.id) == []
 
 
 def test_save_and_load_case_analysis_overwrites_not_appends():

@@ -24,6 +24,17 @@ class CaseRecord(Base):
     saved: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
+    # Richer patient-context scalar fields (additive, all nullable — see
+    # app/models/db.py's _migrate_add_missing_columns for how these get
+    # ALTER-TABLE'd onto the existing `cases` table without touching
+    # already-stored rows). Free-text, no hardcoded value lists, same
+    # philosophy as primary_condition/comorbidities/current_medications.
+    age_group: Mapped[str | None] = mapped_column(String, nullable=True)
+    sex: Mapped[str | None] = mapped_column(String, nullable=True)
+    disease_stage: Mapped[str | None] = mapped_column(String, nullable=True)
+    disease_subtype: Mapped[str | None] = mapped_column(String, nullable=True)
+    disease_duration: Mapped[str | None] = mapped_column(String, nullable=True)
+
 
 class CaseConditionRecord(Base):
     """A comorbidity attached to a case. Free-text, one row per condition."""
@@ -44,6 +55,57 @@ class CaseMedicationRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     case_id: Mapped[int] = mapped_column(ForeignKey("cases.id"), index=True)
     name: Mapped[str] = mapped_column(String)
+
+
+class CasePhenotypeRecord(Base):
+    """A clinical characteristic/phenotype attached to a case. Free-text,
+    one row per phenotype — same shape as CaseConditionRecord, since
+    phenotypes are disease-like free text that will need the same kind of
+    matching against retrieved evidence."""
+
+    __tablename__ = "case_phenotypes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id"), index=True)
+    name: Mapped[str] = mapped_column(String)
+
+
+class CasePreviousTreatmentRecord(Base):
+    """A previous treatment attached to a case, with an optional recorded
+    response (e.g. "no response", "partial", "relapsed"). Free-text,
+    dynamic — no hardcoded drug/response list."""
+
+    __tablename__ = "case_previous_treatments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id"), index=True)
+    name: Mapped[str] = mapped_column(String)
+    response: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class CaseBiomarkerRecord(Base):
+    """A biomarker/lab result attached to a case, with an optional value
+    (e.g. name="HER2", value="positive"). Free-text, dynamic."""
+
+    __tablename__ = "case_biomarkers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id"), index=True)
+    name: Mapped[str] = mapped_column(String)
+    value: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class CaseGeneticMarkerRecord(Base):
+    """A genetic/pharmacogenomic finding attached to a case (e.g.
+    gene="BRCA1", variant="c.68_69delAG"). Free-text, dynamic."""
+
+    __tablename__ = "case_genetic_markers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id"), index=True)
+    gene: Mapped[str] = mapped_column(String)
+    variant: Mapped[str | None] = mapped_column(String, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class CaseAnalysisRecord(Base):

@@ -22,6 +22,7 @@ def make_candidate(
 ) -> CandidateOut:
     return CandidateOut(
         drug=drug,
+        disease="test disease",
         research_priority_score=score,
         evidence_strength_score=score,
         known_indications=[],

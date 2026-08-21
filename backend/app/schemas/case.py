@@ -17,10 +17,52 @@ from pydantic import BaseModel, Field
 ConflictState = Literal["conflict_detected", "no_conflict_detected", "insufficient_evidence"]
 
 
+class PreviousTreatmentInput(BaseModel):
+    """One previous treatment, with an optional recorded response (e.g.
+    'no response', 'partial', 'relapsed'). Free-text, dynamic — no
+    hardcoded drug/response list. Same shape used for both request input
+    and response output (no server-computed fields needed yet)."""
+
+    name: str
+    response: Optional[str] = None
+
+
+class BiomarkerInput(BaseModel):
+    """One biomarker/lab result, with an optional value (e.g.
+    name='HER2', value='positive'). Free-text, dynamic."""
+
+    name: str
+    value: Optional[str] = None
+
+
+class GeneticMarkerInput(BaseModel):
+    """One genetic/pharmacogenomic finding (e.g. gene='BRCA1',
+    variant='c.68_69delAG'). Free-text, dynamic."""
+
+    gene: str
+    variant: Optional[str] = None
+    note: Optional[str] = None
+
+
 class CaseCreate(BaseModel):
     primary_condition: str
     comorbidities: list[str] = Field(default_factory=list)
     current_medications: list[str] = Field(default_factory=list)
+
+    # Richer patient-context fields (all optional — a request containing
+    # only primary_condition/comorbidities/current_medications continues to
+    # work unchanged). Not yet surfaced in the UI; this establishes the
+    # schema/data-model support only.
+    age_group: Optional[str] = None
+    sex: Optional[str] = None
+    disease_stage: Optional[str] = None
+    disease_subtype: Optional[str] = None
+    disease_duration: Optional[str] = None
+    phenotypes: list[str] = Field(default_factory=list)
+    previous_treatments: list[PreviousTreatmentInput] = Field(default_factory=list)
+    biomarkers: list[BiomarkerInput] = Field(default_factory=list)
+    genetic_markers: list[GeneticMarkerInput] = Field(default_factory=list)
+
     allow_duplicate: bool = Field(
         default=False,
         description="If false (default) and an existing case has the exact "
@@ -39,6 +81,20 @@ class CaseOut(BaseModel):
     primary_condition: str
     comorbidities: list[str]
     current_medications: list[str]
+
+    # Richer patient-context fields — see CaseCreate. Default to
+    # None/empty so a case created before this phase still validates and
+    # returns cleanly.
+    age_group: Optional[str] = None
+    sex: Optional[str] = None
+    disease_stage: Optional[str] = None
+    disease_subtype: Optional[str] = None
+    disease_duration: Optional[str] = None
+    phenotypes: list[str] = Field(default_factory=list)
+    previous_treatments: list[PreviousTreatmentInput] = Field(default_factory=list)
+    biomarkers: list[BiomarkerInput] = Field(default_factory=list)
+    genetic_markers: list[GeneticMarkerInput] = Field(default_factory=list)
+
     saved: bool
     created_at: datetime
 
@@ -108,16 +164,70 @@ class CurrentMedicationInteractionNote(BaseModel):
     )
 
 
+class PatientContextCheck(BaseModel):
+    """One check of whether a candidate's supporting evidence actually
+    addresses a specific patient-context attribute (e.g. disease subtype,
+    a biomarker, a prior-treatment response) — distinct from
+    ComorbidityCheck, which checks drug-label safety text, not evidence
+    relevance. Three-state, same non-conflation-of-absence-with-negative
+    rule as ComorbidityCheck.
+
+    Relevance-checking logic is not implemented yet (see PROGRESS.md) —
+    this schema only establishes the contract; `CandidateOut.
+    patient_context_checks` defaults to an empty list until that logic
+    lands."""
+
+    attribute: str = Field(
+        description="Which patient-context attribute this check is about, "
+        "e.g. 'disease_subtype', 'biomarker:HER2', "
+        "'prior_treatment:metformin'."
+    )
+    status: Literal[
+        "relevance_confirmed", "not_addressed_in_evidence", "insufficient_evidence"
+    ]
+    evidence: Optional[str] = Field(
+        default=None,
+        description="Verbatim excerpt from real supporting evidence, "
+        "populated only when status is 'relevance_confirmed' — never "
+        "fabricated, same rule as ComorbidityCheck.evidence.",
+    )
+
+
+class LLMInterpretation(BaseModel):
+    """Phase 4: an optional, additive interpretation of one candidate's
+    already-computed evidence (see app/core/llm_interpreter.py). The LLM
+    (Google Gemini — see PROGRESS.md's Phase 4 entry for why this isn't
+    Anthropic's Claude despite the field/module naming predating the
+    switch) is given only the structured fields already on this
+    CandidateOut (reasoning_trail, comorbidity_checks, known_indications,
+    evidence tier/scores) and instructed never to introduce a new drug,
+    disease, or claim beyond that evidence — it restates/explains, it does
+    not discover. Absent (None) whenever the LLM layer is not configured,
+    disabled, or the call/parse failed; never fabricated as a fallback."""
+
+    summary: str = Field(
+        description="The model's plain-language interpretation of this "
+        "candidate's evidence, grounded only in the structured evidence "
+        "already computed by the deterministic pipeline."
+    )
+    caveats: list[str] = Field(
+        default_factory=list,
+        description="Caveats/limitations the model flagged while "
+        "interpreting this evidence, e.g. sparse evidence or an unresolved "
+        "comorbidity conflict.",
+    )
+    model: str
+    generated_at: datetime
+
+
 class CandidateOut(BaseModel):
     """One repurposing candidate surfaced for this case's primary condition,
     as a research signal — never a recommendation."""
 
     drug: str
     disease: str = Field(
-        default="",
         description="The case-relevant disease/condition this drug is being "
-        "studied for. Defaults to empty for backward compatibility with "
-        "older stored analyses.",
+        "studied for."
     )
     research_priority_score: float
     evidence_strength_score: float = Field(
@@ -142,6 +252,13 @@ class CandidateOut(BaseModel):
     )
     primary_condition_evidence: list[SupportingEvidence]
     comorbidity_checks: list[ComorbidityCheck]
+    patient_context_checks: list[PatientContextCheck] = Field(
+        default_factory=list,
+        description="Evidence-vs-patient-attribute relevance checks (see "
+        "PatientContextCheck). Always empty for now — the relevance-"
+        "checking logic that populates this is a later phase; this field "
+        "only establishes the contract.",
+    )
     current_medication_interactions: CurrentMedicationInteractionNote
     reasoning_trail: list[str] = Field(
         description="Ordered, human-readable trail: known indication -> new "
@@ -151,6 +268,13 @@ class CandidateOut(BaseModel):
     research_framing: str = (
         "Potential research signal — evidence suggests further investigation "
         "may be warranted. Not a treatment recommendation."
+    )
+    llm_interpretation: Optional[LLMInterpretation] = Field(
+        default=None,
+        description="Optional LLM-generated plain-language restatement "
+        "of this candidate's evidence (see LLMInterpretation). None "
+        "whenever the LLM layer is unconfigured, disabled, or failed — "
+        "the candidate itself is always complete and usable without it.",
     )
 
 
@@ -192,8 +316,34 @@ class SourceAttempt(BaseModel):
     error: Optional[str] = None
 
 
+class QueryPlanEntryOut(BaseModel):
+    """One (query, source) dispatch record from the case-research query
+    planner (see app.core.runtime_research.generate_case_queries) — lets a
+    caller determine which patient-context attributes actually contributed
+    to a query, and via which source it was searched. `tier` follows the
+    query-generation tiers (1=core clinical context, 2=population/context
+    refinement, 3=specialized evidence), with 0 reserved for a broadened
+    zero-hit-retry query (see ResearchMetadata.broadened_queries)."""
+
+    tier: int
+    source: str
+    query: str
+    attributes: list[str] = Field(
+        default_factory=list,
+        description="Which case attributes contributed to this query, e.g. "
+        "['primary_condition', 'disease_subtype'].",
+    )
+
+
 class ResearchMetadata(BaseModel):
     queries: list[str] = Field(default_factory=list)
+    query_plan: list[QueryPlanEntryOut] = Field(
+        default_factory=list,
+        description="Structured per-(query, source) instrumentation for "
+        "every query this run generated — see QueryPlanEntryOut. Lets a "
+        "caller determine which patient-context attributes contributed to "
+        "the evidence retrieved for a case.",
+    )
     broadened_queries: list[str] = Field(
         default_factory=list,
         description="Second-tier, less-restrictive queries actually run "
@@ -227,6 +377,13 @@ class ResearchMetadata(BaseModel):
         "secondary source') reads very differently from a clean empty "
         "search ('...found no case-relevant results; checked cached "
         "evidence for validated, relevant signals').",
+    )
+    llm_interpretation_status: Optional[str] = Field(
+        default=None,
+        description="Short status string for the optional Phase 4 LLM "
+        "interpretation layer this run, e.g. 'disabled_no_api_key', "
+        "'success (3 candidate(s) interpreted)', 'attempted_but_failed'. "
+        "None only for analyses run before this field existed.",
     )
 
 

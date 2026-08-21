@@ -20,9 +20,13 @@ from app.core.scoring import normalize as normalize_disease_text
 from app.models.approved_indication import ApprovedIndicationRecord
 from app.models.case import (
     CaseAnalysisRecord,
+    CaseBiomarkerRecord,
     CaseConditionRecord,
     CaseEvidenceCheckRecord,
+    CaseGeneticMarkerRecord,
     CaseMedicationRecord,
+    CasePhenotypeRecord,
+    CasePreviousTreatmentRecord,
     CaseResearchEvidenceRecord,
     CaseRecord,
     CaseSnapshotRecord,
@@ -213,18 +217,59 @@ def load_source_statuses(session: Session) -> list[IngestionStatusRecord]:
     return list(session.execute(select(IngestionStatusRecord)).scalars().all())
 
 
+def _clean_optional_text(value: str | None) -> str | None:
+    """Trims whitespace and collapses an empty/blank string to None.
+    Deliberately does NOT lowercase/normalize — unlike primary_condition/
+    comorbidities/medications (which are matched against disease/drug text
+    elsewhere and so are normalized for that purpose), these are
+    descriptive patient-context fields where the user's original casing
+    (e.g. 'HER2', 'BRCA1') is worth preserving."""
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 def create_case(
     session: Session,
     primary_condition: str,
     comorbidities: list[str],
     current_medications: list[str],
+    *,
+    age_group: str | None = None,
+    sex: str | None = None,
+    disease_stage: str | None = None,
+    disease_subtype: str | None = None,
+    disease_duration: str | None = None,
+    phenotypes: list[str] | None = None,
+    previous_treatments: list[dict] | None = None,
+    biomarkers: list[dict] | None = None,
+    genetic_markers: list[dict] | None = None,
 ) -> CaseRecord:
     """Free-text case creation — no hardcoded disease/drug lists. Condition
     text is normalized the same way every other disease mention already is
     (`app.core.scoring.normalize`); medication text is normalized the same
     way every other drug mention already is (`normalize_drug_name`) so a
-    case's medications line up with `known_drugs`/`documents` entities."""
-    case = CaseRecord(primary_condition=normalize_disease_text(primary_condition))
+    case's medications line up with `known_drugs`/`documents` entities.
+
+    The richer patient-context parameters are all optional/keyword-only so
+    every existing caller (positional primary_condition/comorbidities/
+    current_medications only) keeps working unchanged. `phenotypes` are
+    disease-like free text, normalized the same way comorbidities are (they
+    will need the same downstream matching); `previous_treatments[].name`
+    is a drug name, normalized the same way current_medications are.
+    Everything else (age_group, sex, disease_stage, disease_subtype,
+    disease_duration, biomarkers, genetic_markers) is trimmed but not
+    case-folded — see `_clean_optional_text`.
+    """
+    case = CaseRecord(
+        primary_condition=normalize_disease_text(primary_condition),
+        age_group=_clean_optional_text(age_group),
+        sex=_clean_optional_text(sex),
+        disease_stage=_clean_optional_text(disease_stage),
+        disease_subtype=_clean_optional_text(disease_subtype),
+        disease_duration=_clean_optional_text(disease_duration),
+    )
     session.add(case)
     session.flush()  # assigns case.id before children reference it
 
@@ -237,6 +282,46 @@ def create_case(
         cleaned = normalize_drug_name(name)
         if cleaned:
             session.add(CaseMedicationRecord(case_id=case.id, name=cleaned))
+
+    for name in phenotypes or []:
+        cleaned = normalize_disease_text(name)
+        if cleaned:
+            session.add(CasePhenotypeRecord(case_id=case.id, name=cleaned))
+
+    for item in previous_treatments or []:
+        name = normalize_drug_name(item.get("name") or "")
+        if not name:
+            continue
+        session.add(
+            CasePreviousTreatmentRecord(
+                case_id=case.id,
+                name=name,
+                response=_clean_optional_text(item.get("response")),
+            )
+        )
+
+    for item in biomarkers or []:
+        name = _clean_optional_text(item.get("name"))
+        if not name:
+            continue
+        session.add(
+            CaseBiomarkerRecord(
+                case_id=case.id, name=name, value=_clean_optional_text(item.get("value"))
+            )
+        )
+
+    for item in genetic_markers or []:
+        gene = _clean_optional_text(item.get("gene"))
+        if not gene:
+            continue
+        session.add(
+            CaseGeneticMarkerRecord(
+                case_id=case.id,
+                gene=gene,
+                variant=_clean_optional_text(item.get("variant")),
+                note=_clean_optional_text(item.get("note")),
+            )
+        )
 
     session.commit()
     session.refresh(case)
@@ -303,6 +388,34 @@ def get_case_medications(session: Session, case_id: int) -> list[str]:
         select(CaseMedicationRecord.name).where(CaseMedicationRecord.case_id == case_id)
     ).scalars().all()
     return list(rows)
+
+
+def get_case_phenotypes(session: Session, case_id: int) -> list[str]:
+    rows = session.execute(
+        select(CasePhenotypeRecord.name).where(CasePhenotypeRecord.case_id == case_id)
+    ).scalars().all()
+    return list(rows)
+
+
+def get_case_previous_treatments(session: Session, case_id: int) -> list[dict]:
+    rows = session.execute(
+        select(CasePreviousTreatmentRecord).where(CasePreviousTreatmentRecord.case_id == case_id)
+    ).scalars().all()
+    return [{"name": r.name, "response": r.response} for r in rows]
+
+
+def get_case_biomarkers(session: Session, case_id: int) -> list[dict]:
+    rows = session.execute(
+        select(CaseBiomarkerRecord).where(CaseBiomarkerRecord.case_id == case_id)
+    ).scalars().all()
+    return [{"name": r.name, "value": r.value} for r in rows]
+
+
+def get_case_genetic_markers(session: Session, case_id: int) -> list[dict]:
+    rows = session.execute(
+        select(CaseGeneticMarkerRecord).where(CaseGeneticMarkerRecord.case_id == case_id)
+    ).scalars().all()
+    return [{"gene": r.gene, "variant": r.variant, "note": r.note} for r in rows]
 
 
 def set_case_saved(session: Session, case_id: int, saved: bool) -> CaseRecord | None:

@@ -26,6 +26,7 @@ def _fake_runtime_research(
     current_medications,
     local_approved,
     local_documents=None,
+    **_richer_patient_context,
 ):
     """No-network stand-in for run_runtime_case_research used by the
     `client` fixture below. Real Europe PMC/PubMed/ClinicalTrials.gov calls
@@ -42,6 +43,20 @@ def _fake_runtime_research(
         approved_indications=list(local_approved),
         metadata=ResearchMetadata(),
     )
+
+
+@pytest.fixture(autouse=True)
+def _force_llm_layer_off_by_default(monkeypatch):
+    """Phase 4: forces the LLM interpretation layer off for every test in
+    this file by default, regardless of what's actually set in the
+    ambient environment running the suite — /analyze and /recheck must
+    never make a live Gemini API call in this offline unit-test suite.
+    The two tests that specifically exercise the LLM layer override this
+    explicitly (one by monkeypatching main_module.interpret_candidates
+    outright, which makes this fixture's setting moot for that test)."""
+    from app.core import llm_interpreter
+
+    monkeypatch.setattr(llm_interpreter, "GEMINI_API_KEY", None)
 
 
 @pytest.fixture()
@@ -250,6 +265,100 @@ def test_analyze_surfaces_real_candidate_with_comorbidity_conflict(client, monke
     assert check["status"] == "conflict_detected"
     assert "renal impairment" in check["evidence"].lower()
     assert candidate["research_priority_score"] < candidate["evidence_strength_score"]
+
+
+def test_analyze_attaches_llm_interpretation_when_configured(client, monkeypatch):
+    """Phase 4: the LLM interpretation layer is wired into /analyze as a
+    purely additive step after analyze_case — verified here by
+    monkeypatching main_module.interpret_candidates itself (the same
+    seam-patching convention as run_runtime_case_research above), so this
+    test never depends on a live Gemini API call."""
+    from app.schemas.case import LLMInterpretation
+    from datetime import datetime, timezone
+
+    from app.ingestion.store import upsert_approved_indications, upsert_documents
+    from app.schemas.document import ApprovedIndication, Document
+    from datetime import date
+
+    main_module.init_db()
+    session = main_module.SessionLocal()
+    upsert_documents(
+        session,
+        [
+            Document(
+                drug="metformin",
+                disease="stage iv pancreatic cancer",
+                source="clinicaltrials",
+                source_id="NCT-TEST-8888",
+                phase="phase 2",
+                date=date(2026, 1, 1),
+            )
+        ],
+    )
+    upsert_approved_indications(
+        session,
+        [
+            ApprovedIndication(
+                drug="metformin",
+                disease="type 2 diabetes mellitus",
+                source="openfda",
+                source_id="LABEL-TEST-8888",
+            )
+        ],
+    )
+    session.close()
+
+    def fake_interpret_candidates(candidates, *, primary_condition):
+        for candidate in candidates:
+            candidate.llm_interpretation = LLMInterpretation(
+                summary="Test interpretation grounded in the candidate's own evidence.",
+                caveats=["sparse evidence"],
+                model="gemini-2.5-flash",
+                generated_at=datetime.now(timezone.utc),
+            )
+        return candidates, "success (1 candidate(s) interpreted)"
+
+    monkeypatch.setattr(main_module, "interpret_candidates", fake_interpret_candidates)
+
+    created = client.post(
+        "/cases",
+        json={"primary_condition": "pancreatic cancer", "comorbidities": [], "current_medications": []},
+    ).json()
+
+    response = client.post(f"/cases/{created['id']}/analyze")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["candidates"]) == 1
+    interpretation = body["candidates"][0]["llm_interpretation"]
+    assert interpretation["summary"] == "Test interpretation grounded in the candidate's own evidence."
+    assert interpretation["caveats"] == ["sparse evidence"]
+    assert body["research_metadata"]["llm_interpretation_status"] == "success (1 candidate(s) interpreted)"
+
+
+def test_analyze_leaves_llm_interpretation_none_when_unconfigured(client, monkeypatch):
+    """No GEMINI_API_KEY -> the real (unmocked) interpret_candidates
+    degrades cleanly to a no-op — this is the behavior every other
+    /analyze test in this file already implicitly relies on. Forced here
+    (rather than trusting the ambient environment) so the test is
+    deterministic regardless of what's actually set on the machine running
+    it."""
+    from app.core import llm_interpreter
+
+    monkeypatch.setattr(llm_interpreter, "GEMINI_API_KEY", None)
+
+    created = client.post(
+        "/cases",
+        json={"primary_condition": "some condition", "comorbidities": [], "current_medications": []},
+    ).json()
+
+    response = client.post(f"/cases/{created['id']}/analyze")
+    assert response.status_code == 200
+    body = response.json()
+    # No seeded evidence matches "some condition", so candidates is empty
+    # and the layer short-circuits on "no_candidates" before it would ever
+    # check GEMINI_API_KEY — still proves no live call was attempted.
+    assert body["candidates"] == []
+    assert body["research_metadata"]["llm_interpretation_status"] == "no_candidates"
 
 
 # --- Phase 3: saved-case snapshot + "re-check for new evidence" ------------
@@ -630,6 +739,96 @@ def test_conditions_search_returns_clean_names(client, monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["results"] == [{"name": "Heart Failure"}]
+
+
+# --- Richer patient-context profile (schema/data-model plumbing phase) ----
+
+
+def test_create_case_with_only_original_fields_returns_defaults_for_new_ones(client):
+    """The exact request shape used before this phase must still work, and
+    the response includes the new fields defaulted to None/empty rather
+    than erroring or omitting them."""
+    response = client.post(
+        "/cases",
+        json={
+            "primary_condition": "some condition",
+            "comorbidities": ["a comorbidity"],
+            "current_medications": ["a medication"],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["age_group"] is None
+    assert body["sex"] is None
+    assert body["disease_stage"] is None
+    assert body["disease_subtype"] is None
+    assert body["disease_duration"] is None
+    assert body["phenotypes"] == []
+    assert body["previous_treatments"] == []
+    assert body["biomarkers"] == []
+    assert body["genetic_markers"] == []
+
+
+def test_create_case_with_richer_patient_context_persists_and_returns(client):
+    response = client.post(
+        "/cases",
+        json={
+            "primary_condition": "some condition",
+            "comorbidities": [],
+            "current_medications": [],
+            "age_group": "adult",
+            "sex": "female",
+            "disease_stage": "stage III",
+            "disease_subtype": "triple-negative",
+            "disease_duration": "8 years",
+            "phenotypes": ["Fatigue"],
+            "previous_treatments": [{"name": "Metformin 500mg", "response": "no response"}],
+            "biomarkers": [{"name": "HER2", "value": "positive"}],
+            "genetic_markers": [{"gene": "BRCA1", "variant": "c.68_69delAG"}],
+        },
+    )
+    assert response.status_code == 200
+    created = response.json()
+    assert created["age_group"] == "adult"
+    assert created["sex"] == "female"
+    assert created["disease_stage"] == "stage III"
+    assert created["disease_subtype"] == "triple-negative"
+    assert created["disease_duration"] == "8 years"
+    assert created["phenotypes"] == ["fatigue"]
+    assert created["previous_treatments"] == [{"name": "metformin", "response": "no response"}]
+    assert created["biomarkers"] == [{"name": "HER2", "value": "positive"}]
+    assert created["genetic_markers"] == [
+        {"gene": "BRCA1", "variant": "c.68_69delAG", "note": None}
+    ]
+
+    # Re-fetching returns the same persisted richer profile, not just the
+    # create-response echo.
+    fetched = client.get(f"/cases/{created['id']}").json()["case"]
+    assert fetched["disease_subtype"] == "triple-negative"
+    assert fetched["biomarkers"] == [{"name": "HER2", "value": "positive"}]
+
+
+def test_existing_case_without_new_fields_still_loads(client):
+    """Simulates a case row that predates this phase (created before the
+    new nullable columns/child tables existed) — the new columns are
+    simply NULL/absent, and GET /cases/{id} must still return cleanly with
+    the new fields defaulted rather than 500ing."""
+    from app.ingestion.store import create_case
+
+    main_module.init_db()
+    session = main_module.SessionLocal()
+    case = create_case(
+        session, primary_condition="legacy condition", comorbidities=[], current_medications=[]
+    )
+    case_id = case.id
+    session.close()
+
+    response = client.get(f"/cases/{case_id}")
+    assert response.status_code == 200
+    body = response.json()["case"]
+    assert body["primary_condition"] == "legacy condition"
+    assert body["age_group"] is None
+    assert body["phenotypes"] == []
 
 
 def test_list_cases_reflects_has_new_evidence_after_recheck(client):

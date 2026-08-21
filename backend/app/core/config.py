@@ -91,3 +91,36 @@ CASE_RESEARCH_RETRY_BACKOFF_SECONDS = _float_env("ARB_CASE_RESEARCH_RETRY_BACKOF
 # so a case with many queries can't trip NCBI's rate limit.
 PUBMED_MAX_CONCURRENT_REQUESTS = _int_env("ARB_PUBMED_MAX_CONCURRENT_REQUESTS", 3)
 NCBI_API_KEY = os.environ.get("ARB_NCBI_API_KEY") or None
+
+# --- Phase 4: LLM interpretation layer -----------------------------------
+# Optional, additive layer on top of the deterministic candidate list (see
+# app/core/llm_interpreter.py). The LLM never generates new drug-disease
+# relationships, scores, or evidence of its own — it only restates the
+# already-computed CandidateOut fields in plain language. Missing/invalid
+# configuration must degrade cleanly (no key -> layer is simply off), never
+# fail case analysis.
+#
+# Originally built against Anthropic's Claude API (per the Phase 4 brief);
+# switched to Google's Gemini API at the user's explicit request (2026-08-20)
+# because only a Gemini key was available for live verification in this
+# environment — see PROGRESS.md's Phase 4 entry for the full record. Naming
+# below is provider-neutral (LLM_*, not CLAUDE_*) on purpose so a future
+# provider swap isn't another rename.
+#
+# Standard Gemini API env var name (GEMINI_API_KEY, not ARB_-prefixed) so it
+# matches the convention Google's own SDKs/docs expect.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or None
+LLM_MODEL = os.environ.get("ARB_LLM_MODEL", "gemini-2.5-flash")
+LLM_MAX_TOKENS = _int_env("ARB_LLM_MAX_TOKENS", 600)
+LLM_REQUEST_TIMEOUT_SECONDS = _float_env("ARB_LLM_TIMEOUT_SECONDS", 20.0)
+# How many top-ranked candidates (already sorted by research_priority_score
+# in app.core.case_analysis.analyze_case) get an interpretation per run —
+# bounds API cost/latency instead of calling the LLM once per candidate
+# unconditionally.
+LLM_MAX_CANDIDATES = _int_env("ARB_LLM_MAX_CANDIDATES", 5)
+# Explicit opt-out even when a key is present (e.g. CI, cost control).
+# Absence of GEMINI_API_KEY already disables the layer regardless of this
+# flag.
+LLM_INTERPRETATION_ENABLED = os.environ.get(
+    "ARB_ENABLE_LLM_INTERPRETATION", "true"
+).strip().lower() not in ("0", "false", "no")
