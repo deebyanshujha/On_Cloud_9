@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
 from app.core.case_analysis import analyze_case
+from app.core.llm_interpreter import interpret_candidates
 from app.core.config import SEARCH_RESULT_LIMIT
 from app.core.evidence_diff import diff_candidates
 from app.core.runtime_research import run_runtime_case_research
@@ -30,8 +31,12 @@ from app.ingestion.store import (
     create_case,
     find_matching_case,
     get_case,
+    get_case_biomarkers,
     get_case_conditions,
+    get_case_genetic_markers,
     get_case_medications,
+    get_case_phenotypes,
+    get_case_previous_treatments,
     list_cases,
     load_all_approved_indications,
     load_all_documents,
@@ -56,6 +61,7 @@ from app.schemas.api import (
 )
 from app.schemas.case import (
     AnalysisResult,
+    BiomarkerInput,
     CaseConflictOut,
     CaseCreate,
     CaseOut,
@@ -63,6 +69,8 @@ from app.schemas.case import (
     CaseUpdate,
     CaseWithAnalysis,
     EvidenceCheckResult,
+    GeneticMarkerInput,
+    PreviousTreatmentInput,
     RecheckAllResult,
 )
 
@@ -222,6 +230,19 @@ def _case_out(session, case) -> CaseOut:
         primary_condition=case.primary_condition,
         comorbidities=get_case_conditions(session, case.id),
         current_medications=get_case_medications(session, case.id),
+        age_group=case.age_group,
+        sex=case.sex,
+        disease_stage=case.disease_stage,
+        disease_subtype=case.disease_subtype,
+        disease_duration=case.disease_duration,
+        phenotypes=get_case_phenotypes(session, case.id),
+        previous_treatments=[
+            PreviousTreatmentInput(**t) for t in get_case_previous_treatments(session, case.id)
+        ],
+        biomarkers=[BiomarkerInput(**b) for b in get_case_biomarkers(session, case.id)],
+        genetic_markers=[
+            GeneticMarkerInput(**g) for g in get_case_genetic_markers(session, case.id)
+        ],
         saved=case.saved,
         created_at=case.created_at,
     )
@@ -307,6 +328,15 @@ def create_case_endpoint(payload: CaseCreate) -> CaseOut:
             primary_condition=payload.primary_condition,
             comorbidities=payload.comorbidities,
             current_medications=payload.current_medications,
+            age_group=payload.age_group,
+            sex=payload.sex,
+            disease_stage=payload.disease_stage,
+            disease_subtype=payload.disease_subtype,
+            disease_duration=payload.disease_duration,
+            phenotypes=payload.phenotypes,
+            previous_treatments=[t.model_dump() for t in payload.previous_treatments],
+            biomarkers=[b.model_dump() for b in payload.biomarkers],
+            genetic_markers=[g.model_dump() for g in payload.genetic_markers],
         )
         return _case_out(session, case)
     finally:
@@ -420,6 +450,15 @@ def analyze_case_endpoint(case_id: int) -> AnalysisResult:
             current_medications=get_case_medications(session, case_id),
             local_approved=approved,
             local_documents=local_documents,
+            disease_subtype=case.disease_subtype,
+            phenotypes=get_case_phenotypes(session, case_id),
+            age_group=case.age_group,
+            sex=case.sex,
+            disease_stage=case.disease_stage,
+            disease_duration=case.disease_duration,
+            biomarkers=get_case_biomarkers(session, case_id),
+            genetic_markers=get_case_genetic_markers(session, case_id),
+            previous_treatments=get_case_previous_treatments(session, case_id),
         )
         documents = runtime.documents
         approved = runtime.approved_indications
@@ -432,6 +471,10 @@ def analyze_case_endpoint(case_id: int) -> AnalysisResult:
             target_conditions=comorbidities,
         )
         runtime.metadata.candidate_count = len(candidates)
+        candidates, llm_status = interpret_candidates(
+            candidates, primary_condition=case.primary_condition
+        )
+        runtime.metadata.llm_interpretation_status = llm_status
 
         result = AnalysisResult(
             case_id=case.id,
@@ -476,6 +519,15 @@ def _run_recheck(session, case: CaseRecord) -> EvidenceCheckResult | None:
         current_medications=get_case_medications(session, case.id),
         local_approved=approved,
         local_documents=local_documents,
+        disease_subtype=case.disease_subtype,
+        phenotypes=get_case_phenotypes(session, case.id),
+        age_group=case.age_group,
+        sex=case.sex,
+        disease_stage=case.disease_stage,
+        disease_duration=case.disease_duration,
+        biomarkers=get_case_biomarkers(session, case.id),
+        genetic_markers=get_case_genetic_markers(session, case.id),
+        previous_treatments=get_case_previous_treatments(session, case.id),
     )
     documents = runtime.documents
     approved = runtime.approved_indications
@@ -487,6 +539,10 @@ def _run_recheck(session, case: CaseRecord) -> EvidenceCheckResult | None:
         target_conditions=comorbidities,
     )
     runtime.metadata.candidate_count = len(candidates)
+    candidates, llm_status = interpret_candidates(
+        candidates, primary_condition=case.primary_condition
+    )
+    runtime.metadata.llm_interpretation_status = llm_status
 
     now = datetime.now(timezone.utc)
     # Re-checking also refreshes the "last analysis" record, same as

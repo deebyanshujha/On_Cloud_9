@@ -2581,3 +2581,255 @@ recorded_not_fatal` (a scripted Europe PMC timeout is reported as
 and `test_no_signal_case_returns_zero_candidates_with_metadata` (an
 all-sources-clean-empty run reports `status: "no_results"` on each source,
 a different, honestly-distinguishable status).
+
+## Phase 4 — Claude integration (2026-08-20)
+
+**Prompt, for the record (paraphrased):** integrate Claude into the
+existing research workflow "in the correct architectural location,"
+without assuming where that is — trace the pipeline first, then decide.
+Claude should enhance interpretation/reasoning over evidence, never
+replace or second-guess the deterministic retrieval/scoring/matching
+pipeline. Keep it isolated, testable, mockable in tests, cleanly degrading
+when unconfigured, no hardcoded keys. Preserve all 267 existing backend
+tests. Note: this prompt referred to the project as "MedBridge" and to
+`docs/03-prompts.md`/`docs/05-ai-iterations.md`; neither matches this
+repo (it's TheraLens, no `docs/` directory exists), and `PROGRESS.md`
+above already documented an earlier, explicit "no Claude/paid LLM API"
+constraint for this project. Both discrepancies were flagged to the user
+before writing any code; the user confirmed: proceed anyway (this phase
+deliberately supersedes that earlier constraint), and document here in
+`PROGRESS.md` rather than creating a `docs/` folder.
+
+**What was inspected before writing anything.** A background research pass
+read `app/core/runtime_research.py` (case-specific live retrieval,
+producing `RuntimeResearchResult`), `app/core/case_analysis.py`
+(`analyze_case`, which calls the existing `scoring.run_comparison` and
+attaches per-case comorbidity checks to produce `CandidateOut`s — deliberately
+does no new discovery/matching logic of its own, per its own module
+docstring), `app/main.py`'s `/cases/{id}/analyze` and `/cases/{id}/recheck`
+routes (the only two places that chain retrieval -> analysis -> response),
+`app/schemas/case.py` (found `CandidateOut` already has a documented,
+currently-empty stub for exactly this shape of thing:
+`patient_context_checks: list[PatientContextCheck] = []`), and
+`app/core/config.py` (module-level `os.environ.get(...)` constants, no
+Settings class, `ARB_`-prefixed convention). Confirmed via grep: zero
+existing Claude/Anthropic references anywhere in the backend.
+
+**Where Claude was integrated, and why.** A new, optional step runs after
+`case_analysis.analyze_case` has already produced the final, fully-scored
+`list[CandidateOut]` — inside `analyze_case_endpoint` and `_run_recheck` in
+`app/main.py`, immediately before each builds its `AnalysisResult`. This
+was the only point in the pipeline where Claude can add value without
+being able to fabricate a drug, disease, score, or relationship: by the
+time `analyze_case` returns, every candidate's `reasoning_trail`,
+`comorbidity_checks`, `known_indications`, and scores are already
+deterministic and source-traceable. Claude is handed exactly that
+structured data (nothing else — no raw documents, no live retrieval
+access) and asked only to restate it in plain language plus flag caveats,
+with an explicit system-prompt instruction never to introduce a new
+drug/disease/claim. It cannot influence `research_priority_score`,
+`evidence_tier`, `comorbidity_checks`, or which candidates are even
+surfaced — those are computed and capped entirely before Claude is ever
+called.
+
+**What was built:**
+- `app/core/claude_interpreter.py` (new) — `is_configured()`,
+  `interpret_candidate()`, `interpret_candidates()`, and the sole network
+  seam `_call_claude()` (a single `httpx.post` to Anthropic's Messages API
+  — `httpx` was already a dependency, no new package added). Degrades
+  cleanly and never raises out of `interpret_candidate`/`interpret_candidates`:
+  missing API key, disabled config flag, timeout, HTTP error, or malformed/
+  non-JSON response all just leave `CandidateOut.llm_interpretation` as
+  `None` for that candidate. Bounded to the top `CLAUDE_MAX_CANDIDATES`
+  (default 5) already-ranked candidates per run, not called once per
+  candidate unconditionally.
+- `app/schemas/case.py` — new `ClaudeInterpretation` model (`summary`,
+  `caveats`, `model`, `generated_at`); `CandidateOut.llm_interpretation:
+  Optional[ClaudeInterpretation] = None` (additive, always-optional field);
+  `ResearchMetadata.llm_interpretation_status: Optional[str] = None`
+  (e.g. `"disabled_no_api_key"`, `"success (3 candidate(s) interpreted)"`,
+  `"attempted_but_failed"` — visible per-run status, same spirit as
+  `source_statuses`).
+- `app/core/config.py` — new constants following the existing pattern:
+  `ANTHROPIC_API_KEY` (standard SDK env var name, not `ARB_`-prefixed, so
+  it matches every other Anthropic tool's convention), `CLAUDE_MODEL`
+  (`ARB_CLAUDE_MODEL`, default `claude-sonnet-5`), `CLAUDE_MAX_TOKENS`,
+  `CLAUDE_REQUEST_TIMEOUT_SECONDS` (`ARB_CLAUDE_TIMEOUT_SECONDS`, default
+  20s), `CLAUDE_MAX_CANDIDATES` (`ARB_CLAUDE_MAX_CANDIDATES`, default 5),
+  `CLAUDE_INTERPRETATION_ENABLED` (`ARB_ENABLE_CLAUDE_INTERPRETATION`,
+  default true — an explicit opt-out even when a key is present).
+- `app/main.py` — `interpret_candidates(...)` called once in
+  `analyze_case_endpoint` and once in `_run_recheck`, right after
+  `analyze_case(...)` returns and before `AnalysisResult` is built. Two
+  lines added at each call site; nothing upstream changed.
+
+**What was explicitly not touched:** `app/core/scoring.py`,
+`app/core/disease_matching.py`, `app/core/context_check.py`,
+`app/core/runtime_research.py`, `app/core/case_analysis.py`, and every
+ingestion module — the entire deterministic retrieval/matching/scoring
+pipeline is byte-for-byte unchanged. No frontend changes (out of scope;
+`llm_interpretation` is present in the API response but nothing renders it
+yet).
+
+**Tests added (17 new, all offline/mocked, zero live Claude API calls):**
+`tests/test_claude_interpreter.py` (15 tests) covers `is_configured()`
+truth table, prompt grounding (asserts the JSON sent to Claude contains
+only fields already on the candidate, nothing fabricated), success/
+malformed-JSON/missing-key/HTTP-error/timeout degrade-cleanly paths (all
+via monkeypatching `_call_claude`, the same seam-patching convention
+`test_runtime_research.py` already uses for `_fetch_papers_for_query_safe`/
+`resolve_rxnorm_id`), and batch behavior (`interpret_candidates` caps to
+top-N, reports accurate status strings). `tests/test_case_api.py` gained 2
+tests: one confirming `/analyze` attaches `llm_interpretation` end-to-end
+when the layer is mocked "on," one confirming a clean no-op when
+unconfigured. A new `autouse` fixture in `test_case_api.py` forces
+`ANTHROPIC_API_KEY` off by default for every test in that file (regardless
+of the host machine's actual environment), so the Claude layer can never
+accidentally attempt a live call during the existing 25 `/analyze`/
+`/recheck` tests that don't care about it.
+
+**Test/build results:** 284 backend tests passing (267 pre-existing +
+17 new; verified by re-collecting before/after — the arithmetic matches
+exactly). Frontend `tsc -b && vite build` passes unchanged (no frontend
+files touched). No `httpx.Client` left open by the new module — `_call_claude`
+uses `httpx.post()`, the one-shot convenience function that opens and closes
+its own connection per call, same pattern as everywhere else `httpx` is used
+for a single request in this codebase. `git diff --stat` on
+`backend/data/arbitrage.db` and `backend/app/models/case.py` confirmed
+byte-identical to before this phase's edits — the only files this phase
+touched are `app/core/config.py`, `app/core/claude_interpreter.py` (new),
+`app/main.py`, `app/schemas/case.py`, `tests/test_claude_interpreter.py`
+(new), and `tests/test_case_api.py`.
+
+**Live Claude verification:** not performed as part of this phase — no
+`ANTHROPIC_API_KEY` was available/configured in this environment, and the
+task explicitly required automated tests not to depend on one. The
+integration is exercised only via mocked `_call_claude`/`interpret_candidates`.
+If a live smoke test is wanted, set `ANTHROPIC_API_KEY` and `POST` to
+`/cases/{id}/analyze` for a case with real seeded evidence, then inspect
+`candidates[*].llm_interpretation` and
+`research_metadata.llm_interpretation_status` in the response — kept
+separate from the automated suite by design.
+
+**Known limitations / open decisions for the user:**
+- No frontend rendering of `llm_interpretation` yet — it's present in the
+  API response only. Deliberately out of scope per "avoid unnecessary UI
+  changes."
+- `CLAUDE_MAX_CANDIDATES` (default 5) means a case with more than 5
+  candidates only gets interpretations on the top 5 by
+  `research_priority_score`; the rest have `llm_interpretation: null`.
+  Worth revisiting if that's surprising in the UI later.
+- This phase supersedes the project's earlier documented "no Claude/paid
+  LLM API" constraint (see the top of this file) by explicit user
+  instruction — flagging again here in case that reversal wasn't meant to
+  be permanent/global.
+- No retry logic on `_call_claude` (unlike the retrieval layer's
+  `get_with_retry`) — a single Anthropic API timeout/5xx just skips that
+  candidate's interpretation for this run rather than retrying. Chosen
+  because this layer is interpretive/non-critical (candidates are fully
+  usable without it), not because retrying wouldn't help; easy to add if
+  transient failures turn out to be common in practice.
+
+## Phase 4 addendum (2026-08-21) — provider swap to Gemini + live verification
+
+**Provider swap.** The user only had a Google Gemini API key available, not
+an Anthropic one. Renaming an env var alone would have been misleading
+(Gemini and Claude have different endpoints, auth headers, and request/
+response shapes — a rename would just produce a broken 401 against
+Anthropic's API), so — per explicit user instruction — the integration was
+actually rewired to call Google's Gemini `generateContent` API instead of
+Anthropic's Messages API. Renamed everything that was Claude-branded to
+provider-neutral naming so the code doesn't lie about what it calls:
+`app/core/claude_interpreter.py` -> `app/core/llm_interpreter.py`;
+`ClaudeInterpretation` -> `LLMInterpretation` (schemas/case.py);
+`ANTHROPIC_API_KEY`/`CLAUDE_MODEL`/`CLAUDE_MAX_TOKENS`/
+`CLAUDE_REQUEST_TIMEOUT_SECONDS`/`CLAUDE_MAX_CANDIDATES`/
+`CLAUDE_INTERPRETATION_ENABLED` -> `GEMINI_API_KEY`/`LLM_MODEL`/
+`LLM_MAX_TOKENS`/`LLM_REQUEST_TIMEOUT_SECONDS`/`LLM_MAX_CANDIDATES`/
+`LLM_INTERPRETATION_ENABLED` (config.py); env vars ->
+`GEMINI_API_KEY`/`ARB_LLM_MODEL`/`ARB_LLM_MAX_TOKENS`/
+`ARB_LLM_TIMEOUT_SECONDS`/`ARB_LLM_MAX_CANDIDATES`/
+`ARB_ENABLE_LLM_INTERPRETATION`. Default model: `gemini-2.5-flash`. The
+architecture, integration point (after `analyze_case`, before
+`AnalysisResult` is built), grounding rules (only structured candidate
+fields sent, system prompt forbids introducing new drugs/diseases/claims),
+and clean-degrade behavior are all unchanged from the original design —
+this was a network-layer swap, not a redesign. `tests/test_claude_interpreter.py`
+was replaced by `tests/test_llm_interpreter.py` (17 tests, same coverage,
+updated for Gemini's request/response shape); `tests/test_case_api.py`'s
+autouse fixture and two Phase 4 tests were updated to match.
+
+**Secret-handling note, for the record.** The real Gemini key was initially
+pasted by the user into `backend/.env.example` — a file that is deliberately
+*not* gitignored (it's meant to be committed as a template). This was
+caught and fixed before anything was committed: the key was moved into
+`backend/.env` (which the repo's root `.gitignore` already covered via a
+bare `.env` pattern, confirmed with `git check-ignore -v`), and
+`.env.example` was reset to a placeholder. Nothing containing the real key
+value ever entered git history or this document — verified by grepping the
+full working-tree diff and every changed/new file for the key's literal
+value before writing this entry.
+
+**Live verification (real Gemini API calls, separate from the automated
+suite).** Five scenarios, each in its own fresh Python process (so
+`app.core.config`'s module-level constants pick up that scenario's env vars
+cleanly) against the real, unmocked pipeline — `run_runtime_case_research`
+was NOT mocked, so each run did real live retrieval (Europe PMC/PubMed/
+ClinicalTrials.gov/openFDA) on top of 3 synthetically seeded documents
+(metformin/sildenafil/thalidomide against pancreatic-cancer-adjacent
+disease text), for the case `primary_condition="pancreatic cancer"`:
+
+1. **Baseline, no key** (`GEMINI_API_KEY` unset): `is_configured() == False`,
+   10 real candidates returned (`atra`, `nab paclitaxel`, `pembrolizumab`,
+   `eribulin` x5 staging variants, `cyclophosphamide`, `fludarabine`),
+   every `llm_interpretation` null, `llm_interpretation_status ==
+   "disabled_no_api_key"`. Response `200`.
+2. **Success, real key, defaults** (`ARB_LLM_MAX_CANDIDATES` default 5):
+   `is_configured() == True`. Same 10 candidates, same scores/order as the
+   baseline (`atra 0.47`, `nab paclitaxel 0.47`, `pembrolizumab 0.44`,
+   `eribulin 0.43`, ...) — deterministic ranking bit-for-bit unchanged by
+   enabling the LLM layer. Of the top 5 attempted, 3 got a real
+   `LLMInterpretation` (`atra`, `pembrolizumab`, `eribulin`); 2 failed
+   individually (model returned something the parser rejected) and
+   correctly stayed `null` without affecting the other 8 candidates or the
+   response status. `llm_interpretation_status == "success (3
+   candidate(s) interpreted)"`. Inspected `atra`'s real interpretation
+   text: *"Atra is currently being investigated as a potential treatment
+   for pancreatic cancer. This signal is supported by one clinical trial
+   (NCT04241276), leading to a moderate evidence strength score of
+   0.47."* with caveats naming the single-trial evidence and lack of
+   approval — correctly grounded only in that candidate's real
+   `reasoning_trail`/`supporting_documents`, no fabricated drug, disease,
+   or mechanism.
+3. **`ARB_LLM_MAX_CANDIDATES=2`**: same 10 candidates/same scores again;
+   exactly the top 2 (`atra`, `nab paclitaxel`) got a real interpretation,
+   all 8 others null, `llm_interpretation_status == "success (2
+   candidate(s) interpreted)"` — cap respected exactly.
+4. **Invalid key** (`GEMINI_API_KEY` set to garbage): real Gemini
+   401/400 hit and caught. Response still `200`, all 10 deterministic
+   candidates intact, every `llm_interpretation` null,
+   `llm_interpretation_status == "attempted_but_failed"`.
+5. **Timeout** (`ARB_LLM_TIMEOUT_SECONDS=0.001`, real key): real
+   `httpx` timeout against the live endpoint, caught. Response still
+   `200`, all 10 candidates intact, `llm_interpretation_status ==
+   "attempted_but_failed"`.
+
+Across all 5 runs: zero leaked threads (`threading.enumerate()` diffed
+before/after each request — `llm_interpreter._call_llm` uses `httpx.post()`,
+which opens and closes its own connection per call), and each run's own
+output file was asserted, in-script, to never contain the raw key
+substring before being written to disk.
+
+**Result:** 286/286 automated backend tests still pass (unchanged — no
+test was made to depend on a live call), frontend `tsc -b && vite build`
+still passes unchanged. No bug was found in the integration logic itself;
+the only real issue found and fixed was the secret-handling mistake above
+(caught before any commit). Files changed for the provider swap: `app/core/
+config.py`, `app/schemas/case.py`, `app/main.py` (one import line),
+`backend/.env.example` (placeholder only); `app/core/claude_interpreter.py`
+replaced by `app/core/llm_interpreter.py`;
+`tests/test_claude_interpreter.py` replaced by `tests/test_llm_interpreter.py`;
+`tests/test_case_api.py` updated. `scoring.py`, `disease_matching.py`,
+`context_check.py`, `runtime_research.py`, `case_analysis.py`, and every
+ingestion module remain untouched. Nothing was committed as part of this
+addendum, per instruction.
